@@ -1,8 +1,10 @@
 
 export const DEFAULT_STYLE = "Cinematic 2D anime style, high-end production quality, sharp focus, vibrant lighting, expressive character designs, professional concept art";
 
-// Gemini Model Configuration
-export const TEXT_MODEL = 'gemini-3-pro-preview'; // 升级为 Pro 以支持更复杂的剧本逻辑
+// Model IDs (locked by consensus)
+// TEXT: aihubmix gemini -> gemini-3-flash-preview
+// IMAGE: aihubmix gemini -> gemini-3-pro-image-preview
+export const TEXT_MODEL = 'gemini-3-flash-preview';
 export const IMAGE_MODEL = 'gemini-3-pro-image-preview';
 
 export const SYSTEM_INSTRUCTION_BREAKDOWN = `
@@ -19,15 +21,27 @@ export const SYSTEM_INSTRUCTION_BREAKDOWN = `
 `;
 
 export const SYSTEM_INSTRUCTION_MATRIX = `
-你是一个九机位提示词专家。
-根据镜头描述、全局风格和角色参考，生成9个不同机位的生图 Prompt。
-机位分配顺序必须严格遵循 3x3 矩阵：
-1. 远景 (EST) | 2. 过肩 (OTS) | 3. 特写 (CU)
-4. 中景 (MS) | 5. 仰拍 (Low Angle) | 6. 俯拍 (High Angle)
-7. 侧拍 (Profile) | 8. 极特写 (ECU) | 9. 荷兰式斜角 (Dutch Angle)
+你是一个九机位提示词专家与影视导演助理。
+根据镜头描述、全局风格与资产上下文（角色/场景/道具参考信息），为同一镜头生成 9 个不同机位的生图 Prompt。
 
-每个 Prompt 必须是英文，包含全局风格和角色描述。确保角色在不同机位下的特征（如伤疤、配饰、服装）保持高度一致。
-返回 JSON 数组（9个字符串）。
+强制要求：
+1) 除专业镜头术语外，Prompt 的主体语言必须与剧本主体语言一致；默认输出中文，不得强制转为英文。
+2) 必须高度忠实于剧本原文基础上进行视觉化、影视化设计；不得自行改写剧情关键信息。
+3) 机位命名必须使用 Angle_01 ~ Angle_09，并在每条 Prompt 开头标注。
+4) 如果输入包含参考图说明（角色/场景/道具），必须在 Prompt 中保留其语义用途与绑定关系（例如“角色一致性/第一帧参考/道具一致性”等）。
+
+机位分配顺序严格遵循 3x3 矩阵（Angle_01 → Angle_09）：
+Angle_01 远景(EST)
+Angle_02 过肩(OTS)
+Angle_03 特写(CU)
+Angle_04 中景(MS)
+Angle_05 仰拍(Low Angle)
+Angle_06 俯拍(High Angle)
+Angle_07 侧拍(Profile)
+Angle_08 极特写(ECU)
+Angle_09 荷兰式斜角(Dutch Angle)
+
+返回 JSON 数组（9 个字符串），顺序必须与 Angle_01..Angle_09 一致。
 `;
 
 export const SYSTEM_INSTRUCTION_OPTIMIZE = `

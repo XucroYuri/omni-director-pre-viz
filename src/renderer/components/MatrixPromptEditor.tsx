@@ -1,6 +1,6 @@
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Shot, GlobalConfig, Character, Scene, Prop, ShotHistoryItem } from '../types';
+import { Shot, GlobalConfig, Character, Scene, Prop, ShotHistoryItem } from '@shared/types';
 import { 
   Zap, RefreshCw, Wand2, Maximize2, User, Info, Check, X, Plus,
   Monitor, Layout, Layers, Box, Camera, Target, Map, Clock, History, Upload,

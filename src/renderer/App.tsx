@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import MatrixPromptEditor from './components/MatrixPromptEditor';
-import { GlobalConfig, Shot, ScriptBreakdownResponse, Character, ShotHistoryItem } from './types';
-import { DEFAULT_STYLE } from './constants';
+import { GlobalConfig, Shot, ScriptBreakdownResponse, Character, ShotHistoryItem } from '@shared/types';
+import { DEFAULT_STYLE } from '@shared/constants';
 import { 
   FileText, Terminal, Settings, X, RefreshCw, Zap, Clock, 
   CheckCircle2, AlertCircle, Loader2, Cpu, Monitor, FastForward,
@@ -40,7 +40,7 @@ const App: React.FC = () => {
       characters: [],
       scenes: [],
       props: [],
-      apiProvider: 'google'
+      apiProvider: 'aihubmix'
     };
   });
 
