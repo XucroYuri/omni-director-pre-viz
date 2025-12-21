@@ -40,6 +40,8 @@
 | **视频模型** | **Sora-2 (model: `sora-2`)** | 禁止接入 Veo 或其他模型；ID 需代码锁定 |
 | **前端安全** | **Zero-Secret Frontend** | Key 仅存 Main 进程/Keychain；Renderer 禁止接触 Key |
 | **旧数据迁移** | **不自动迁移** | 桌面端作为全新安装；提供“旧原型导出 JSON -> 桌面端导入”路径 |
+| **迁移策略** | **保留现有 Vite 原型并迁移至 `renderer/`** | 以现有可运行 UI/流程为起点，逐步替换为 Electron Main+IPC 架构 |
+| **依赖管理口径** | **运行时依赖进 `dependencies`** | `electron-builder` 默认仅打包 `dependencies`；放错会导致生产 Crash |
 | **并发控制** | **分池限流 + 自动降级** | LLM=10 / IMG=5 / VID=3；遇 429 自动降级并发并冷却恢复 |
 | **SQLite 策略** | **预编译优先 + 单实例锁** | 优先用 `better-sqlite3` 预编译包；App 启动强制 `requestSingleInstanceLock` |
 | **更新机制** | **手动提示 (MVP)** | 仅检测版本号提示跳转 GitHub Release，暂不做自动热更 |
@@ -84,6 +86,6 @@
 
 ## 6. Phase 1 开工前置检查 (Phase 1 Pre-launch Checklist)
 
-- [ ] **GitHub Repo**: 仓库已创建并推送首个基线 commit。
+- [x] **GitHub Repo**: 仓库已创建并推送首个基线 commit（`https://github.com/XucroYuri/omni-director-pre-viz`）。
 - [ ] **Branch Protection**: `main` 分支已开启 "Require Code Owner Review" 保护。
 - [ ] **Gatekeeper**: `maintainer-approved` 标签流程已在团队内宣贯。

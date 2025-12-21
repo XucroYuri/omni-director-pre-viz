@@ -472,6 +472,7 @@ Ref 语义要求（实现必须遵守）：
 - Phase 1：Electron 壳与开发体验（约 2 天）
   - Electron + Vite + React 基础模板
   - 依赖建议：`electron`、`electron-builder`、`concurrently`（或等价脚本）
+  - 依赖分层：运行时依赖（Main 会调用且需随包）放 `dependencies`；构建/开发工具放 `devDependencies`（避免生产环境缺包）
   - Main/Renderer 双进程调试（VSCode）
   - IPC 基础封装（`ipcRenderer.invoke` + 类型定义）
   - electron-builder 基础配置（能打包出 dev 产物）

@@ -242,6 +242,7 @@ vFuture（未来演进预留）：
 
 ### 5.1 桌面端（推荐）
 - **Electron + electron-builder**：构建 `dmg` / `portable.exe|zip` / `AppImage`。
+- **依赖分层（强制）**：运行时会被 Main 调用并需随包的库（如 `better-sqlite3`、`fs-extra`、`p-queue`）放 `dependencies`；构建/开发工具（如 `electron`、`electron-builder`、`vite`、`typescript`）放 `devDependencies`。
 - 元数据：SQLite
 - 媒体：文件系统（默认 `{WorkspaceRoot}/OmniDirector/output`；用户可配置；内部缓存可使用 `{appData}` 但不得替代 output 的交付口径）
 - 进度推送：IPC 或 SSE（本地 HTTP 时）
