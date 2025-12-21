@@ -1,4 +1,5 @@
 import type { GlobalConfig, PromptOptimization, ScriptBreakdownResponse, Shot } from '@shared/types';
+import type { DiscoverMissingAssetsResult } from '@shared/ipc';
 
 const requireApi = () => {
   if (!window.api) {
@@ -45,7 +46,6 @@ export const generateAssetImage = async (name: string, description: string, conf
 export const discoverMissingAssets = async (
   shot: Shot,
   config: GlobalConfig,
-): Promise<{ characters: any[]; scenes: any[]; props: any[] }> => {
+): Promise<DiscoverMissingAssetsResult> => {
   return requireApi().ai.discoverMissingAssets(shot, config);
 };
-

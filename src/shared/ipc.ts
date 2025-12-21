@@ -16,7 +16,12 @@ export const IPC_CHANNELS = {
 } as const;
 
 export type RecommendAssetsResult = { characterIds: string[]; sceneIds: string[]; propIds: string[] };
-export type DiscoverMissingAssetsResult = { characters: any[]; scenes: any[]; props: any[] };
+export type MissingAssetCandidate = { name: string; description: string };
+export type DiscoverMissingAssetsResult = {
+  characters: MissingAssetCandidate[];
+  scenes: MissingAssetCandidate[];
+  props: MissingAssetCandidate[];
+};
 
 export type PreloadApi = {
   ping: () => Promise<string>;
@@ -32,4 +37,3 @@ export type PreloadApi = {
     discoverMissingAssets: (shot: Shot, config: GlobalConfig) => Promise<DiscoverMissingAssetsResult>;
   };
 };
-
