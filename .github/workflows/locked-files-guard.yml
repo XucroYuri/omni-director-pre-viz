@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   guard:
-    name: Guard locked files
+    name: Locked Files Guard
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -58,14 +58,23 @@ jobs:
           echo "$LOCKED_TOUCHED"
           echo ""
 
-          HAS_LABEL="$(
-            python - <<'PY'
+          HAS_LABEL="false"
+          if command -v python3 >/dev/null 2>&1; then
+            HAS_LABEL="$(
+              python3 - <<'PY'
 import json, os
-labels = json.loads(os.environ.get("PR_LABELS_JSON", "[]") or "[]")
+raw = os.environ.get("PR_LABELS_JSON", "[]") or "[]"
+try:
+  labels = json.loads(raw)
+except Exception:
+  labels = []
 target = os.environ.get("LOCKED_FILES_APPROVAL_LABEL", "")
-print("true" if any(l.get("name") == target for l in labels) else "false")
+print("true" if any((l or {}).get("name") == target for l in (labels or [])) else "false")
 PY
-          )"
+            )"
+          elif echo "${PR_LABELS_JSON:-[]}" | grep -q "\"name\":\"${LOCKED_FILES_APPROVAL_LABEL}\""; then
+            HAS_LABEL="true"
+          fi
 
           if [[ "$HAS_LABEL" == "true" ]]; then
             echo "Found approval label '${LOCKED_FILES_APPROVAL_LABEL}'. Allowing."
