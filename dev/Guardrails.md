@@ -64,6 +64,10 @@
 - 建议在 GitHub 仓库设置中开启分支保护：Require review from Code Owners。
  - 若未替换占位符或未启用分支保护/CODEOWNERS Review，本文件描述的“硬门禁”将只停留在文档层，无法形成真实约束（开工前必须完成）。
 
+注意（GitHub 计费/仓库可见性限制）：
+- 在 **个人账号的私有仓库** 中，GitHub 可能会要求升级（例如 Pro/Team）或将仓库设为 Public，才允许启用 “Require review from Code Owners”。
+- 若短期内无法启用 Code Owners 强制审核：请至少启用 Classic 分支保护的 “Require PR + Require status checks（Locked Files Guard）+ 禁止 force push/删除”，并通过 `Required approvals` + 人工流程保证关键改动有人审。
+
 ---
 
 ## 4. 分支保护（Repository Settings）
