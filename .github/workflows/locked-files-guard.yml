@@ -1,0 +1,88 @@
+name: Locked Files Guard
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard:
+    name: Guard locked files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce locked files policy
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_LABELS_JSON: ${{ toJson(github.event.pull_request.labels) }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          # Optional allowlist (comma-separated GitHub usernames), keep empty by default.
+          LOCKED_FILES_ALLOWED_ACTORS: ""
+          # Maintainers can unblock a PR by adding this label.
+          LOCKED_FILES_APPROVAL_LABEL: "maintainer-approved"
+        run: |
+          set -euo pipefail
+
+          echo "Base: $BASE_SHA"
+          echo "Head: $HEAD_SHA"
+
+          CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" || true)"
+          if [[ -z "${CHANGED_FILES}" ]]; then
+            echo "No changed files detected."
+            exit 0
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          # Locked file patterns (regex).
+          # NOTE: Must match *files under directories* (e.g. providers/**), not just the directory name itself.
+          LOCKED_REGEX='(^|/)(modelIds\.(ts|js|json|ya?ml)|providerConfig\.(ts|js|json|ya?ml)|providerRouter\.(ts|js|json|ya?ml)|providerRegistry\.(ts|js|json|ya?ml)|aihubmix\.(ts|js|json|ya?ml)|aiProvider\.(ts|js|json|ya?ml))$|(^|/)(providers|main/providers)/'
+
+          LOCKED_TOUCHED="$(echo "$CHANGED_FILES" | grep -E "$LOCKED_REGEX" || true)"
+          if [[ -z "${LOCKED_TOUCHED}" ]]; then
+            echo "No locked files touched."
+            exit 0
+          fi
+
+          echo ""
+          echo "Locked files touched:"
+          echo "$LOCKED_TOUCHED"
+          echo ""
+
+          HAS_LABEL="$(
+            python - <<'PY'
+import json, os
+labels = json.loads(os.environ.get("PR_LABELS_JSON", "[]") or "[]")
+target = os.environ.get("LOCKED_FILES_APPROVAL_LABEL", "")
+print("true" if any(l.get("name") == target for l in labels) else "false")
+PY
+          )"
+
+          if [[ "$HAS_LABEL" == "true" ]]; then
+            echo "Found approval label '${LOCKED_FILES_APPROVAL_LABEL}'. Allowing."
+            exit 0
+          fi
+
+          # Optional allowlist (for repos without labels usage)
+          if [[ -n "${LOCKED_FILES_ALLOWED_ACTORS}" ]]; then
+            IFS=',' read -r -a allowed <<< "${LOCKED_FILES_ALLOWED_ACTORS}"
+            for a in "${allowed[@]}"; do
+              if [[ "${GITHUB_ACTOR}" == "${a// /}" ]]; then
+                echo "Actor '${GITHUB_ACTOR}' is allowlisted. Allowing."
+                exit 0
+              fi
+            done
+          fi
+
+          echo "::error::This PR modifies locked files, but is missing label '${LOCKED_FILES_APPROVAL_LABEL}'."
+          echo "Add the label '${LOCKED_FILES_APPROVAL_LABEL}' (maintainers only), or do not touch the locked files."
+          exit 1

@@ -1,0 +1,22 @@
+# CODEOWNERS makes GitHub automatically request reviews for sensitive areas.
+# Maintainer: @XucroYuri
+
+# Default
+* @XucroYuri
+
+# Locked AI/provider configuration (must be maintainer-reviewed)
+**/modelIds.* @XucroYuri
+**/providers/** @XucroYuri
+**/providerConfig.* @XucroYuri
+**/providerRouter.* @XucroYuri
+**/providerRegistry.* @XucroYuri
+**/aihubmix.* @XucroYuri
+**/aiProvider.* @XucroYuri
+
+# vNext Electron local-backend authority locations (recommended)
+main/modelIds.* @XucroYuri
+main/providerConfig.* @XucroYuri
+main/providerRouter.* @XucroYuri
+main/providerRegistry.* @XucroYuri
+main/providers/** @XucroYuri
+main/preload.* @XucroYuri
