@@ -74,6 +74,9 @@
   - Require status checks to pass（勾选 `Locked Files Guard`）
   - Do not allow bypassing the above settings（按团队实际权限决定）
 
+注意（GitHub UI 差异）：
+- 若你在 **Rulesets**（新规则系统）里找不到 “Require review from Code Owners”，或页面提示 ruleset 不会在当前仓库形态生效（例如个人账号私有仓库），请改用 **Classic branch protection rule**（旧分支保护）来开启该选项并确保真实生效。
+
 ---
 
 ## 5. 密钥与开源卫生
