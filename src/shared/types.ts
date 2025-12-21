@@ -58,7 +58,7 @@ export interface Shot {
   lastAccessedAt?: number; 
 }
 
-export type ApiProvider = 'google';
+export type ApiProvider = 'aihubmix';
 
 export interface GlobalConfig {
   artStyle: string;

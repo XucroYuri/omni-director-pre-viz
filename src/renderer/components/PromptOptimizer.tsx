@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Shot, PromptOptimization } from '../types';
+import { Shot, PromptOptimization } from '@shared/types';
 import { 
   X, Wand2, Loader2, MessageSquare, 
   Sparkles, CheckCircle, RefreshCw, Check,

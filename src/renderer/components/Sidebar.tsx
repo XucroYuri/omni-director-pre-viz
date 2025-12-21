@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useRef } from 'react';
-import { GlobalConfig, Shot } from '../types';
+import { GlobalConfig, Shot } from '@shared/types';
 import { 
   Plus, User, Database, Palette, Sparkles, Loader2,
   ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen, Trash2, Box, Map,
@@ -39,10 +39,31 @@ const Sidebar: React.FC<SidebarProps> = ({
   const toggle = (s: keyof typeof expanded) => setExpanded(p => ({ ...p, [s]: !p[s] }));
 
   const themeMap = {
-    indigo: { text: 'text-indigo-400', border: 'hover:border-indigo-400/40', bg: 'bg-indigo-500', shadow: 'shadow-indigo-500/20' },
-    amber: { text: 'text-amber-400', border: 'hover:border-amber-400/40', bg: 'bg-amber-500', shadow: 'shadow-amber-500/20' },
-    emerald: { text: 'text-emerald-400', border: 'hover:border-emerald-400/40', bg: 'bg-emerald-500', shadow: 'shadow-emerald-500/20' }
-  };
+    indigo: {
+      text: 'text-indigo-400',
+      border: 'hover:border-indigo-400/40',
+      bg: 'bg-indigo-500',
+      shadow: 'shadow-indigo-500/20',
+      linkedCard: 'border-indigo-400 ring-1 ring-indigo-400/30 shadow-[0_0_20px_rgba(var(--indigo-rgb),0.25)]',
+      badgeBg: 'bg-indigo-500',
+    },
+    amber: {
+      text: 'text-amber-400',
+      border: 'hover:border-amber-400/40',
+      bg: 'bg-amber-500',
+      shadow: 'shadow-amber-500/20',
+      linkedCard: 'border-amber-400 ring-1 ring-amber-400/30 shadow-[0_0_20px_rgba(var(--amber-rgb),0.25)]',
+      badgeBg: 'bg-amber-500',
+    },
+    emerald: {
+      text: 'text-emerald-400',
+      border: 'hover:border-emerald-400/40',
+      bg: 'bg-emerald-500',
+      shadow: 'shadow-emerald-500/20',
+      linkedCard: 'border-emerald-400 ring-1 ring-emerald-400/30 shadow-[0_0_20px_rgba(var(--emerald-rgb),0.25)]',
+      badgeBg: 'bg-emerald-500',
+    },
+  } as const;
 
   const selectedShot = useMemo(() => shots.find(s => s.id === selectedShotId), [shots, selectedShotId]);
 
@@ -175,11 +196,11 @@ const Sidebar: React.FC<SidebarProps> = ({
     return (
       <div className={`bg-[#1c2027]/80 border p-3 rounded-lg group relative transition-all duration-300 backdrop-blur-sm ${
         isLinkedToShot 
-          ? `border-${colorKey}-400 ring-1 ring-${colorKey}-400/30 shadow-[0_0_20px_rgba(var(--${colorKey}-rgb),0.25)]` 
+          ? theme.linkedCard
           : 'border-white/10 hover:border-white/20'
       }`}>
         {isLinkedToShot && (
-          <div className={`absolute -top-1.5 -right-1.5 bg-${colorKey}-500 text-white rounded-full p-1 shadow-xl z-20 border-2 border-[#1c2027] animate-in zoom-in`}>
+          <div className={`absolute -top-1.5 -right-1.5 ${theme.badgeBg} text-white rounded-full p-1 shadow-xl z-20 border-2 border-[#1c2027] animate-in zoom-in`}>
              <Check size={8} strokeWidth={5} />
           </div>
         )}
