@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron';
 import * as path from 'node:path';
 import { registerIpcHandlers } from './ipc';
+import { loadLocalEnvFiles } from './loadEnv';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -46,6 +47,7 @@ async function createMainWindow() {
 }
 
 app.whenReady().then(async () => {
+  loadLocalEnvFiles();
   await createMainWindow();
 
   app.on('activate', async () => {

@@ -4,7 +4,7 @@
 
 # Omni-Director Pre-viz Workstation
 
-本仓库当前包含一个 **Web SPA 原型**（历史产物）以及一套已锁定的 **Electron Desktop 重构计划**（权威实施标准）。
+本仓库已进入 **Electron Desktop 重构迭代**。当前主线为 Electron 骨架（Main/Preload/Renderer）+ 本地门禁体系（Docs-as-Gates）。
 
 权威入口（实施与验收以此为准）：
 - `dev/Plan-Codex.md`
@@ -12,11 +12,19 @@
 - `dev/Guardrails.md`
 - 共识锁定：`dev/Consensus-Lock.md`
 
-## 当前原型（仅供参考）
-原型仍是浏览器环境的 Vite/React 项目；其安全与架构不符合最终交付红线（例如“前端零密钥”“aihubmix-only”“Sora-2-only”等），重构时会迁移到 `renderer/` 并由 `main/` 承担所有生成与落盘。
-
-如需本地运行原型（仅用于 UI 参考）：
+## 本地运行（开发）
 1. `npm install`
 2. `npm run dev`
+
+`npm run dev` 会同时启动：
+- `vite`（Renderer dev server，`127.0.0.1:3000`）
+- `electron`（Main Process，加载 `window.api` IPC 桥接）
+
+## 开发环境变量（仅本地）
+桌面端生成能力在 Main Process 读取密钥，默认从环境变量/本地 `.env.local` 注入（`.env.example` 提供模板）：
+- `AIHUBMIX_API_KEY`
+
+输出目录（开发默认）：
+- `app.getPath('userData')/output`（可用 `OMNI_OUTPUT_DIR` 覆盖）
 
 > 注意：不要在前端 bundle/URL/日志中放入任何真实密钥；最终方案会在桌面端主进程中通过“弹窗输入 + 加密持久化 + 设备绑定失效”管理 aihubmix key。
