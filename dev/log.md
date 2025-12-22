@@ -23,3 +23,21 @@
   - 确认数据层级 **Season -> Episode -> Beat -> Shot**。
   - 确认 **aihubmix-only** 与 **Zero-Secret** 安全红线。
 - **状态**: G队已同意启动 Phase 1 (Skeleton)。
+
+## 2025-12-22: Phase 1 & 2 完成 (Electron 骨架与 Provider 接入)
+- **事件**: 完成 Phase 1 (Electron 骨架) 与 Phase 2 (Main IPC Provider)。
+- **成果**:
+  - Phase 1: 建立 `src/main`, `src/preload`, `src/renderer` 隔离架构；移除前端 Provider SDK。
+  - Phase 2: 实现 Main 进程 `aihubmix` 接入 (Gemini/Sora-2)；实现并发限流；实现 IPC 安全通道。
+  - **合规**: 通过 G 队代码审计 (S级)；通过 Docs-as-Gates 锁定检查（触碰锁定区需 Maintainer 标签）。
+- **门禁事件**: `Locked Files Guard` 因触碰锁定区（`src/main/providers/**`）拦截；Maintainer 已添加标签 `maintainer-approved`，Actions 重跑并放行。
+- **状态**: PR `feat/phase2-aihubmix-provider-ipc` 已通过 CI 门禁，准备合并。
+
+## 2025-12-22: 本地开发环境问题 - Electron 安装与环境变量
+- **事件**: `npm run dev` 启动时 Electron 报错 “failed to install correctly”，以及 `app.whenReady` 为 `undefined`。
+- **原因**:
+  - Electron 二进制未下载（`node_modules/electron/dist` 缺失）。
+  - 本机环境变量 `ELECTRON_RUN_AS_NODE=1` 导致 Electron 以 Node 模式运行（无 `app`）。
+- **处置**:
+  - 使用 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ node node_modules/electron/install.js` 触发下载。
+  - 在 `package.json` 的 `dev:electron` 中强制设置 `ELECTRON_RUN_AS_NODE=0` / `ELECTRON_FORCE_IS_PACKAGED=0` 防止再次误触。
