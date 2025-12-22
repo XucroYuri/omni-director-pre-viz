@@ -7,7 +7,7 @@
 ## Compliance Check (Docs-as-Gates)
 - [ ] Dependencies structured per `rules.md` and `.trae/rules/rules.deps.globs.md`
 - [ ] Renderer boundary respected per `.trae/rules/rules.globs.md` (no Node/Electron + no provider SDKs)
-- [ ] If touching locked areas: PR has label `maintainer-approved` and requests CODEOWNERS review
+- [ ] If touching locked areas: add label `maintainer-approved` (maintainer-only; otherwise `Locked Files Guard` will fail)
 
 ## What changed?
 Describe the change succinctly.
