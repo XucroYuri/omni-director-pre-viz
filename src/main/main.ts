@@ -25,7 +25,7 @@ async function createMainWindow() {
       preload: getPreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: !isDev(),
     },
   });
 
