@@ -56,6 +56,10 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
 
   const prompts = shot.matrixPrompts || Array(9).fill('');
   const camNames = ['全景 (EST)', '过肩 (OTS)', '特写 (CU)', '中景 (MS)', '仰拍 (LOW)', '俯拍 (HI)', '侧面 (SIDE)', '极特写 (ECU)', '斜角 (DUTCH)'];
+  const boundCharacters = config.characters.filter((c) => shot.characterIds?.includes(c.id));
+  const boundScenes = config.scenes.filter((s) => shot.sceneIds?.includes(s.id));
+  const boundProps = config.props.filter((p) => shot.propIds?.includes(p.id));
+  const hasBoundAssets = boundCharacters.length + boundScenes.length + boundProps.length > 0;
 
   useEffect(() => {
     handleDiscoverAssets();
@@ -197,6 +201,20 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     </div>
   );
 
+  const AssetChip = ({ label, tone }: { label: string; tone: 'indigo' | 'amber' | 'emerald' }) => (
+    <span
+      className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+        tone === 'indigo'
+          ? 'border-indigo-400/40 text-indigo-300 bg-indigo-500/10'
+          : tone === 'amber'
+            ? 'border-amber-400/40 text-amber-300 bg-amber-500/10'
+            : 'border-emerald-400/40 text-emerald-300 bg-emerald-500/10'
+      }`}
+    >
+      {label}
+    </span>
+  );
+
   return (
     <div className="h-full flex flex-col overflow-hidden bg-[#0f1115]">
       {/* 工具栏 */}
@@ -260,6 +278,26 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             <AssetBubble key={scene.id} item={scene} accentColor="amber" active={shot.sceneIds?.includes(scene.id)} onUnlink={() => {}} typeIcon={<MapIcon size={16}/>} />
           ))}
         </div>
+      </div>
+
+      {/* 资产注入提示 */}
+      <div className="h-10 border-b border-white/10 bg-[#10141a] flex items-center px-6 gap-2 shrink-0 overflow-x-auto scrollbar-none">
+        <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">已注入资产</span>
+        {hasBoundAssets ? (
+          <div className="flex items-center gap-2">
+            {boundCharacters.map((c) => (
+              <AssetChip key={`char-${c.id}`} label={`角色:${c.name}`} tone="indigo" />
+            ))}
+            {boundScenes.map((s) => (
+              <AssetChip key={`scene-${s.id}`} label={`场景:${s.name}`} tone="amber" />
+            ))}
+            {boundProps.map((p) => (
+              <AssetChip key={`prop-${p.id}`} label={`道具:${p.name}`} tone="emerald" />
+            ))}
+          </div>
+        ) : (
+          <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">未绑定资产</span>
+        )}
       </div>
 
       {/* 矩阵核心：单母图模式 vs 子图模式 */}

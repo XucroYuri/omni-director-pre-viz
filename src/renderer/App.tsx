@@ -48,6 +48,14 @@ const App: React.FC = () => {
   const [apiStatus, setApiStatus] = useState<'connected' | 'error' | 'idle'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const normalizePolicyError = (message: string) => {
+    if (!message) return message;
+    if (!message.includes('POLICY_VIOLATION')) return message;
+    if (message.includes('Missing Scene')) return '生成失败：请先绑定场景。';
+    if (message.includes('Missing Character')) return '生成失败：请先绑定角色，或将镜头标记为 ENV 纯环境。';
+    return '生成失败：未满足资产绑定规则。';
+  };
+
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(config)); }, [config]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.SCRIPT, script); }, [script]);
   useEffect(() => { 
@@ -93,7 +101,8 @@ const App: React.FC = () => {
       });
       setApiStatus('connected');
     } catch (error: any) {
-      setErrorMessage(error.message);
+      const message = typeof error?.message === 'string' ? error.message : 'Unknown error';
+      setErrorMessage(normalizePolicyError(message));
       setApiStatus('error');
     } finally { setIsGeneratingImage(false); }
   };
