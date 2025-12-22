@@ -88,11 +88,6 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
 
   const handleCreateShotVideo = async (index: number) => {
     if (!shot.splitImages || !shot.splitImages[index] || shot.videoStatus?.[index] === 'processing') return;
-    
-    // API Key selection for Veo models
-    if (window.aistudio && !(await window.aistudio.hasSelectedApiKey())) {
-      await window.aistudio.openSelectKey();
-    }
 
     const nextStatus = [...(shot.videoStatus || Array(9).fill('idle'))];
     nextStatus[index] = 'processing';
@@ -245,7 +240,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                       onClick={() => handleCreateShotVideo(idx)}
                       disabled={videoStatus === 'processing'}
                       className={`p-1.5 rounded-lg border border-white/10 backdrop-blur-md transition-all ${videoStatus === 'completed' ? 'bg-emerald-500 text-white' : 'bg-black/60 text-slate-200 hover:bg-indigo-600'}`}
-                      title="生成视频预演 (Veo I2V)"
+                      title="生成视频预演 (Sora-2)"
                     >
                       {videoStatus === 'processing' ? <Loader2 size={12} className="animate-spin"/> : <Video size={12}/>}
                     </button>

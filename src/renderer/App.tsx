@@ -12,16 +12,6 @@ import {
 import { breakdownScript, generateGridImage, optimizePrompts, generateMatrixPrompts, recommendAssets } from './services/geminiService';
 import { splitGridImage } from './utils/imageUtils';
 
-declare global {
-  interface AIStudio {
-    hasSelectedApiKey: () => Promise<boolean>;
-    openSelectKey: () => Promise<void>;
-  }
-  interface Window {
-    aistudio?: AIStudio;
-  }
-}
-
 const STORAGE_KEYS = {
   CONFIG: 'OMNI_DIRECTOR_CONFIG',
   SCRIPT: 'OMNI_DIRECTOR_SCRIPT',
@@ -74,11 +64,6 @@ const App: React.FC = () => {
   const handleGenerateImage = async (shotId: string) => {
     const shot = breakdown?.shots.find(s => s.id === shotId);
     if (!shot || isGeneratingImage) return;
-
-    // 检查 API KEY 逻辑 (Image API)
-    if (window.aistudio && !(await window.aistudio.hasSelectedApiKey())) {
-      await window.aistudio.openSelectKey();
-    }
 
     setIsGeneratingImage(true);
     setErrorMessage(null);
