@@ -31,7 +31,16 @@
   - Phase 2: 实现 Main 进程 `aihubmix` 接入 (Gemini/Sora-2)；实现并发限流；实现 IPC 安全通道。
   - **合规**: 通过 G 队代码审计 (S级)；通过 Docs-as-Gates 锁定检查（触碰锁定区需 Maintainer 标签）。
 - **门禁事件**: `Locked Files Guard` 因触碰锁定区（`src/main/providers/**`）拦截；Maintainer 已添加标签 `maintainer-approved`，Actions 重跑并放行。
-- **状态**: PR `feat/phase2-aihubmix-provider-ipc` 已通过 CI 门禁，准备合并。
+- **状态**: PR `feat/phase2-aihubmix-provider-ipc` 已合并至 `main`。
+
+## 2025-12-22: Phase 3 完成 (前端联调 & Smoke Test)
+- **事件**: 完成 Phase 3 (Frontend Integration) 并合并至 `main`。
+- **成果**:
+  - **全链路打通**: UI (`MatrixPromptEditor`) -> IPC -> Main Provider (`aihubmix`) -> Output (`videos/`) -> UI Preview。
+  - **遗留清理**: 彻底移除 Renderer 中残留的 `window.aistudio` (旧 Veo SDK) 逻辑。
+  - **CI 状态**: PR `feat/phase3-frontend-integration` 通过所有门禁（本次未触碰锁定文件，无需额外标签）。
+- **当前状态**: 代码已合并。建议立即进行全链路 Smoke Test (Text -> Image -> Video)。
+- **后续计划**: 根据 Smoke Test 结果，准备 Phase 4 (打包与发布) 或进入功能迭代 (Phase 1.1)。
 
 ## 2025-12-22: 本地开发环境问题 - Electron 安装与环境变量
 - **事件**: `npm run dev` 启动时 Electron 报错 “failed to install correctly”，以及 `app.whenReady` 为 `undefined`。
