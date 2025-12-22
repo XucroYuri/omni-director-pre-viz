@@ -29,17 +29,20 @@ async function createMainWindow() {
     },
   });
 
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show();
+  });
+
   if (isDev()) {
     await mainWindow.loadURL('http://127.0.0.1:3000');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
   } else {
     const indexHtml = path.join(app.getAppPath(), 'dist', 'renderer', 'index.html');
     await mainWindow.loadFile(indexHtml);
   }
-
-  mainWindow.once('ready-to-show', () => {
-    mainWindow?.show();
-  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
