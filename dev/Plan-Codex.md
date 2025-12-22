@@ -31,6 +31,7 @@
 - **存储脆弱**：大图 Base64/历史写入 LocalStorage 风险高；缺少本地媒体库（文件系统）与元数据存储（SQLite）、导出/备份回落与历史清理策略。
 - **流程偏差风险**：容易被误实现为“九机位分别生成 9 张图”，与主需求冲突。
 - **Provider 策略变更**：AI 调用仅允许走 aihubmix（Gemini 兼容规范，但不直连 Gemini 官方）；参数归一化与安全边界需明确。
+- **产品体验缺失 (Phase 4)**：Ratio/Resolution 前端不可选；缺乏 Video 生成确认流；Light/Dark 主题缺失；国际化 (i18n) 未落地；资产一致性策略未形成闭环。
 
 ---
 
@@ -100,6 +101,11 @@
 | 本地 HTTP 是否允许作为 IPC 备选 | **已拍板**：允许；默认 IPC-first；若启用本地 HTTP，必须 127.0.0.1+随机端口+会话 token（见 4.6.1） | Maintainer | 已确认 |
 | ZIP 导出是否默认包含视频 | **已拍板**：默认不包含（体积大）；导出选项拆分为“图片/视频”两类，由用户勾选是否包含 `videos/`（manifest 仍记录视频条目） | PM/Maintainer | 已确认 |
 | 输出保留策略 | **已拍板（MVP）**：仅“手动清理 + 导出后可选清理 + 超配额提示”，不做自动删除（见 9.1） | PM/Maintainer | 已确认 |
+| Ratio/Resolution 配置 | **已拍板**：Ratio 仅支持 `16:9` (Default) 与 `9:16`；Resolution 默认锁定 `2K`；必须在 UI 增加选择器并透传 Main | PM | 已确认 |
+| 资产一致性策略 | **已拍板**：不仅角色，需覆盖道具/场景；必须在 Prompt 组装时显式注入资产描述（Subject/Wearing/Holding/Environment） | PM | 已确认 |
+| UI/UX 规范 | **已拍板**：Light/Dark 双主题；字体/图标大小需符合可读性标准；配色需高对比度 | PM | 已确认 |
+| 国际化 (i18n) | **已拍板**：默认简体中文 (zh-CN)；支持自动探测与 en-US 回落 | PM | 已确认 |
+| 跨平台部署 (Phase 5) | **已拍板**：Win/Mac/Linux 三端一键安装（Setup Scripts）；CI/CD 自动构建产物 | PM | 已确认 |
 
 ### 2.1.1 “进入真实迭代”的含义与建议（已拍板：进入）
 当你希望“规则与门禁能真实生效、并且多人协作可控”时，建议进入真实迭代；否则保持“原型试验”更省成本。
@@ -835,3 +841,44 @@ Ref 语义要求（实现必须遵守）：
 - Provider 策略满足需求：**仅 aihubmix**；密钥只存在 Main/Local-Backend，不出现在 Renderer bundle/URL/日志明文；模型 ID 通过“锁定注释”集中管理且仅允许维护者人工修改；Schema 校验与错误分类具备实施路径。
 - 目录结构达标：repo 内形成 `main/` + `renderer/` + `shared/` 三块；Renderer 严格 Browser-only；Shared 为纯 TS；Main 承担 Provider/FS/DB/导出。
 - 边界可验证：存在门禁（CI/lint/脚本均可）确保 `renderer/` 不依赖 Provider SDK/适配层，且媒体访问不通过任意 `file://` 直读。
+
+---
+
+## 11. Phase 4 执行计划（Product Polish & Experience）
+> 状态：**已确认并锁定**
+> 核心目标：可见收益 → 体验闭环 → 一致性 → 系统化
+
+### 11.1 执行顺序（已拍板）
+
+1. **全局配置 UI 与透传**
+   - **内容**：Ratio 仅支持 `16:9` (Default) / `9:16`；Resolution 默认 `2K`。
+   - **要求**：UI 增加选择器；参数必须透传至 Main 进程。
+
+2. **Video 生成 UX**
+   - **内容**：增加生成确认弹窗；提供详细状态流转（Queued → Processing → Downloading → Completed）。
+   - **要求**：用户必须明确感知视频生成的高成本与当前进度。
+
+3. **资产一致性策略 V1**
+   - **内容**：角色/道具/场景三类资产显式注入 Prompt。
+   - **要求**：在 Prompt 组装时，必须包含 `Subject` (Character), `Wearing`, `Holding` (Prop), `Environment` (Scene) 的明确描述。
+
+4. **UI/UX 主题与可读性**
+   - **内容**：支持 Light/Dark 双主题；提升字体与图标的可读性。
+   - **要求**：符合无障碍标准，高对比度，长时间使用不疲劳。
+
+5. **i18n 国际化**
+   - **内容**：架构支持多语言；默认 `zh-CN`；支持系统语言探测；`en-US` 作为回退。
+   - **要求**：所有 UI 文本提取到资源文件；Prompt 生成逻辑支持语种配置（虽然默认中文）。
+
+6. **Phase 4 Smoke Test**
+   - **内容**：Text → Image → Video 全链路复测。
+   - **验收**：覆盖所有新特性，确保无回归。
+
+### 11.2 验收方式
+- **明确验收点**：每一项都设定明确验收点（UI 入口可见、配置透传有效、生成流程可追踪、资产映射可读、语言可切换）。
+- **通过标准**：Phase 4 结束以 Smoke Test 通过为准。
+
+### 11.3 计划安排
+- **Step 1 (Control)**：先做 **配置 UI + Video UX**，确保用户可控与流程清晰。
+- **Step 2 (Consistency)**：再做 **资产一致性 V1**，解决多资产映射与 Prompt 结构。
+- **Step 3 (Polish)**：最后补齐 **主题与 i18n**，完成产品层体验打磨。
