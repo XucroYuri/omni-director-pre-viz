@@ -232,6 +232,20 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-2 h-9">
+            <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Shot Kind</span>
+            <select
+              className="bg-transparent text-[10px] font-black uppercase tracking-widest text-slate-200 outline-none"
+              value={shot.shotKind || 'CHAR'}
+              onChange={(e) => onUpdateShot({ shotKind: e.target.value as Shot['shotKind'] })}
+            >
+              <option value="CHAR">CHAR</option>
+              <option value="ENV">ENV</option>
+              <option value="POV">POV</option>
+              <option value="INSERT">INSERT</option>
+              <option value="MIXED">MIXED</option>
+            </select>
+          </div>
           <button onClick={handleBatchDownload} disabled={!shot.splitImages} className="h-9 px-4 bg-white/5 border border-white/10 text-slate-400 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2">
             <Download size={14} /> Download All
           </button>
