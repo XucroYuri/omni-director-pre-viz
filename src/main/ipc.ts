@@ -30,8 +30,8 @@ export function registerIpcHandlers() {
   );
   ipcMain.handle(IPC_CHANNELS.ai.optimizePrompts, async (_evt, shot, config) => limiters.llm(() => optimizePrompts(shot, config)));
   ipcMain.handle(IPC_CHANNELS.ai.generateGridImage, async (_evt, shot, config) => limiters.image(() => generateGridImage(shot, config)));
-  ipcMain.handle(IPC_CHANNELS.ai.generateShotVideo, async (_evt, imageUri, prompt, config) =>
-    limiters.video(() => generateShotVideo(imageUri, prompt, config)),
+  ipcMain.handle(IPC_CHANNELS.ai.generateShotVideo, async (_evt, params, config) =>
+    limiters.video(() => generateShotVideo(params, config)),
   );
   ipcMain.handle(IPC_CHANNELS.ai.enhanceAssetDescription, async (_evt, name, currentDesc) =>
     limiters.llm(() => enhanceAssetDescription(name, currentDesc)),

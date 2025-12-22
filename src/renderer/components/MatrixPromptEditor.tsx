@@ -52,10 +52,16 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
   const [videoModalIndex, setVideoModalIndex] = useState<number | null>(null);
   const [videoPromptDraft, setVideoPromptDraft] = useState('');
   const [syncVideoPrompt, setSyncVideoPrompt] = useState(true);
+  const [isGeneratingAnimatic, setIsGeneratingAnimatic] = useState(false);
+  const [showAnimaticPreview, setShowAnimaticPreview] = useState(false);
   const videoTimersRef = useRef<Record<number, { processing?: ReturnType<typeof setTimeout>; downloading?: ReturnType<typeof setTimeout> }>>({});
 
   const prompts = shot.matrixPrompts || Array(9).fill('');
   const camNames = ['全景 (EST)', '过肩 (OTS)', '特写 (CU)', '中景 (MS)', '仰拍 (LOW)', '俯拍 (HI)', '侧面 (SIDE)', '极特写 (ECU)', '斜角 (DUTCH)'];
+  const boundCharacters = config.characters.filter((c) => shot.characterIds?.includes(c.id));
+  const boundScenes = config.scenes.filter((s) => shot.sceneIds?.includes(s.id));
+  const boundProps = config.props.filter((p) => shot.propIds?.includes(p.id));
+  const hasBoundAssets = boundCharacters.length + boundScenes.length + boundProps.length > 0;
 
   useEffect(() => {
     handleDiscoverAssets();
@@ -132,7 +138,16 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
 
     try {
       const prompt = (promptOverride || prompts[index] || shot.visualTranslation).trim();
-      const videoUrl = await generateShotVideo(shot.splitImages[index], prompt, config);
+      const videoUrl = await generateShotVideo(
+        {
+          inputMode: 'IMAGE_FIRST_FRAME',
+          shot,
+          angleIndex: index,
+          imageUri: shot.splitImages[index],
+          prompt,
+        },
+        config,
+      );
       const nextUrls = [...(shot.videoUrls || Array(9).fill(null))];
       nextUrls[index] = videoUrl;
       clearVideoTimers(index);
@@ -148,6 +163,26 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     }
   };
 
+  const handleGenerateAnimatic = async () => {
+    if (!shot.generatedImageUrl || isGeneratingAnimatic) return;
+    setIsGeneratingAnimatic(true);
+    try {
+      const videoUrl = await generateShotVideo(
+        {
+          inputMode: 'MATRIX_FRAME',
+          shot,
+          imageUri: shot.generatedImageUrl,
+        },
+        config,
+      );
+      onUpdateShot({ animaticVideoUrl: videoUrl });
+      setShowAnimaticPreview(true);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsGeneratingAnimatic(false);
+    }
+  };
   const openVideoModal = (index: number) => {
     setVideoModalIndex(index);
     setVideoPromptDraft(prompts[index] || shot.visualTranslation);
@@ -197,6 +232,20 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     </div>
   );
 
+  const AssetChip = ({ label, tone }: { label: string; tone: 'indigo' | 'amber' | 'emerald' }) => (
+    <span
+      className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+        tone === 'indigo'
+          ? 'border-indigo-400/40 text-indigo-300 bg-indigo-500/10'
+          : tone === 'amber'
+            ? 'border-amber-400/40 text-amber-300 bg-amber-500/10'
+            : 'border-emerald-400/40 text-emerald-300 bg-emerald-500/10'
+      }`}
+    >
+      {label}
+    </span>
+  );
+
   return (
     <div className="h-full flex flex-col overflow-hidden bg-[#0f1115]">
       {/* 工具栏 */}
@@ -214,6 +263,34 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-2 h-9">
+            <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Shot Kind</span>
+            <select
+              className="bg-transparent text-[10px] font-black uppercase tracking-widest text-slate-200 outline-none"
+              value={shot.shotKind || 'CHAR'}
+              onChange={(e) => onUpdateShot({ shotKind: e.target.value as Shot['shotKind'] })}
+            >
+              <option value="CHAR">CHAR</option>
+              <option value="ENV">ENV</option>
+              <option value="POV">POV</option>
+              <option value="INSERT">INSERT</option>
+              <option value="MIXED">MIXED</option>
+            </select>
+          </div>
+          <button
+            onClick={() => {
+              if (shot.animaticVideoUrl) {
+                setShowAnimaticPreview(true);
+              } else {
+                handleGenerateAnimatic();
+              }
+            }}
+            disabled={!shot.generatedImageUrl || isGeneratingAnimatic}
+            className="h-9 px-4 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+          >
+            {isGeneratingAnimatic ? <Loader2 size={14} className="animate-spin" /> : <Film size={14} />}
+            {shot.animaticVideoUrl ? 'Animatic Preview' : 'Generate Animatic'}
+          </button>
           <button onClick={handleBatchDownload} disabled={!shot.splitImages} className="h-9 px-4 bg-white/5 border border-white/10 text-slate-400 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2">
             <Download size={14} /> Download All
           </button>
@@ -260,6 +337,26 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             <AssetBubble key={scene.id} item={scene} accentColor="amber" active={shot.sceneIds?.includes(scene.id)} onUnlink={() => {}} typeIcon={<MapIcon size={16}/>} />
           ))}
         </div>
+      </div>
+
+      {/* 资产注入提示 */}
+      <div className="h-10 border-b border-white/10 bg-[#10141a] flex items-center px-6 gap-2 shrink-0 overflow-x-auto scrollbar-none">
+        <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">已注入资产</span>
+        {hasBoundAssets ? (
+          <div className="flex items-center gap-2">
+            {boundCharacters.map((c) => (
+              <AssetChip key={`char-${c.id}`} label={`角色:${c.name}`} tone="indigo" />
+            ))}
+            {boundScenes.map((s) => (
+              <AssetChip key={`scene-${s.id}`} label={`场景:${s.name}`} tone="amber" />
+            ))}
+            {boundProps.map((p) => (
+              <AssetChip key={`prop-${p.id}`} label={`道具:${p.name}`} tone="emerald" />
+            ))}
+          </div>
+        ) : (
+          <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">未绑定资产</span>
+        )}
       </div>
 
       {/* 矩阵核心：单母图模式 vs 子图模式 */}
@@ -373,6 +470,28 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                  </div>
                  <p className="text-slate-200 text-sm leading-relaxed italic">"{prompts[activePreviewIndex]}"</p>
               </div>
+          </div>
+        </div>
+      )}
+
+      {showAnimaticPreview && shot.animaticVideoUrl && (
+        <div className="fixed inset-0 bg-black/95 z-[210] flex items-center justify-center p-10" onClick={() => setShowAnimaticPreview(false)}>
+          <div className="relative w-full h-full max-w-6xl flex flex-col items-center gap-6" onClick={(e) => e.stopPropagation()}>
+            <div className="absolute top-0 right-0 p-4">
+              <button onClick={() => setShowAnimaticPreview(false)} className="p-3 bg-white/10 rounded-full hover:bg-white/20 transition-all">
+                <X size={24} className="text-white" />
+              </button>
+            </div>
+            <div className="flex-1 w-full bg-black rounded-3xl overflow-hidden border border-white/10 shadow-[0_0_80px_rgba(99,102,241,0.25)]">
+              <video src={shot.animaticVideoUrl} className="w-full h-full object-contain" controls autoPlay />
+            </div>
+            <div className="bg-white/5 backdrop-blur-xl p-6 rounded-2xl border border-white/10 w-full">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="px-3 py-1 bg-indigo-500 text-white text-[10px] font-black rounded-lg uppercase">Animatic</span>
+                <span className="text-slate-500 text-xs font-mono">SHOT: {shot.id}</span>
+              </div>
+              <p className="text-slate-200 text-sm leading-relaxed italic">"{shot.visualTranslation}"</p>
+            </div>
           </div>
         </div>
       )}

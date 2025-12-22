@@ -1,4 +1,4 @@
-import type { GlobalConfig, PromptOptimization, ScriptBreakdownResponse, Shot } from '@shared/types';
+import type { GlobalConfig, PromptOptimization, ScriptBreakdownResponse, Shot, VideoGenerationParams } from '@shared/types';
 import type { DiscoverMissingAssetsResult, RecommendAssetsResult } from '@shared/ipc';
 
 const requireApi = () => {
@@ -31,8 +31,8 @@ export const generateGridImage = async (shot: Shot, config: GlobalConfig): Promi
   return requireApi().ai.generateGridImage(shot, config);
 };
 
-export const generateShotVideo = async (imageUri: string, prompt: string, config: GlobalConfig): Promise<string> => {
-  return requireApi().ai.generateShotVideo(imageUri, prompt, config);
+export const generateShotVideo = async (params: VideoGenerationParams, config: GlobalConfig): Promise<string> => {
+  return requireApi().ai.generateShotVideo(params, config);
 };
 
 export const enhanceAssetDescription = async (name: string, currentDesc: string): Promise<string> => {

@@ -78,3 +78,12 @@
   - `MatrixPromptEditor.tsx`: 新增视频生成确认弹窗 (Prompt 二次编辑 + Sync 选项)；实现 queued -> processing -> downloading 状态流转 UI。
   - `shared/types.ts`: 扩展 `videoStatus` 状态枚举。
 - **状态**: 代码已就绪，准备提交 PR `feat/phase4-step1-control`。
+
+## 2025-12-22: Phase 4 Step 2 架构升级 (G队)
+- **背景**: 用户反馈验证了 Matrix Video (母图生视频) 的价值，提出 Asset Video (拼贴生视频) 需求。
+- **决策**: 升级 Step 2 为“多模态一致性架构预埋”。
+- **变更**:
+  - 标准化视频输入模式: `TEXT_ONLY` / `IMAGE_FIRST_FRAME` (Slot) / `MATRIX_FRAME` (Animatic) / `ASSET_COLLAGE`。
+  - 扩展 `Shot` 类型: 新增 `VideoInputMode` 及 `animaticVideoUrl`。
+  - 规划新入口: Renderer 端新增 "Generate Animatic" 按钮。
+- **状态**: 规范文档 `dev/Phase4-Step2-Revised-Spec.md` 已创建，等待 C 队执行。

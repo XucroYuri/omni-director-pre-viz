@@ -37,15 +37,19 @@ export interface PromptOptimization {
   optimizedPrompts: string[];
 }
 
+export type VideoInputMode = 'TEXT_ONLY' | 'IMAGE_FIRST_FRAME' | 'IMAGE_FIRST_LAST' | 'MATRIX_FRAME' | 'ASSET_COLLAGE';
+
 export interface Shot {
   id: string;
   originalText: string;
   visualTranslation: string;
   contextTag: string;
+  shotKind?: 'CHAR' | 'ENV' | 'POV' | 'INSERT' | 'MIXED';
   matrixPrompts?: string[]; // 9个机位的提示词 (作为生成母图的参数)
   generatedImageUrl?: string; // 3x3 矩阵母图
   splitImages?: string[]; // 物理切片后的9张图
   videoUrls?: (string | null)[]; // 9个视角对应的视频结果
+  animaticVideoUrl?: string; // 基于 3x3 母图生成的动态分镜视频 (Matrix Video)
   status: 'pending' | 'processing' | 'completed' | 'failed';
   videoStatus?: ('idle' | 'queued' | 'processing' | 'downloading' | 'completed' | 'failed')[];
   progress?: number; 
@@ -56,6 +60,14 @@ export interface Shot {
   propIds?: string[]; 
   linkedShotIds?: string[]; 
   lastAccessedAt?: number; 
+}
+
+export interface VideoGenerationParams {
+  inputMode: VideoInputMode;
+  shot: Shot;
+  prompt?: string;
+  imageUri?: string;
+  angleIndex?: number;
 }
 
 export type ApiProvider = 'aihubmix';

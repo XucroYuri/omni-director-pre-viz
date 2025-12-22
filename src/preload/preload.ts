@@ -9,7 +9,7 @@ const api: PreloadApi = {
     generateMatrixPrompts: (shot, config) => ipcRenderer.invoke(IPC_CHANNELS.ai.generateMatrixPrompts, shot, config),
     optimizePrompts: (shot, config) => ipcRenderer.invoke(IPC_CHANNELS.ai.optimizePrompts, shot, config),
     generateGridImage: (shot, config) => ipcRenderer.invoke(IPC_CHANNELS.ai.generateGridImage, shot, config),
-    generateShotVideo: (imageUri, prompt, config) => ipcRenderer.invoke(IPC_CHANNELS.ai.generateShotVideo, imageUri, prompt, config),
+    generateShotVideo: (params, config) => ipcRenderer.invoke(IPC_CHANNELS.ai.generateShotVideo, params, config),
     enhanceAssetDescription: (name, currentDesc) => ipcRenderer.invoke(IPC_CHANNELS.ai.enhanceAssetDescription, name, currentDesc),
     generateAssetImage: (name, description, config) => ipcRenderer.invoke(IPC_CHANNELS.ai.generateAssetImage, name, description, config),
     discoverMissingAssets: (shot, config) => ipcRenderer.invoke(IPC_CHANNELS.ai.discoverMissingAssets, shot, config),
@@ -17,4 +17,3 @@ const api: PreloadApi = {
 };
 
 contextBridge.exposeInMainWorld('api', api);
-

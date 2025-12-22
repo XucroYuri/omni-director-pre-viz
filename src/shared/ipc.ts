@@ -1,4 +1,4 @@
-import type { GlobalConfig, PromptOptimization, ScriptBreakdownResponse, Shot } from './types';
+import type { GlobalConfig, PromptOptimization, ScriptBreakdownResponse, Shot, VideoGenerationParams } from './types';
 
 export const IPC_CHANNELS = {
   ping: 'app:ping',
@@ -31,7 +31,7 @@ export type PreloadApi = {
     generateMatrixPrompts: (shot: Shot, config: GlobalConfig) => Promise<string[]>;
     optimizePrompts: (shot: Shot, config: GlobalConfig) => Promise<PromptOptimization>;
     generateGridImage: (shot: Shot, config: GlobalConfig) => Promise<string>;
-    generateShotVideo: (imageUri: string, prompt: string, config: GlobalConfig) => Promise<string>;
+    generateShotVideo: (params: VideoGenerationParams, config: GlobalConfig) => Promise<string>;
     enhanceAssetDescription: (name: string, currentDesc: string) => Promise<string>;
     generateAssetImage: (name: string, description: string, config: GlobalConfig) => Promise<string>;
     discoverMissingAssets: (shot: Shot, config: GlobalConfig) => Promise<DiscoverMissingAssetsResult>;
