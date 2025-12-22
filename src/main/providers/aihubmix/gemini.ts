@@ -55,25 +55,40 @@ function parseDataUri(dataUri: string) {
   return { mimeType, base64 };
 }
 
-function getShotAssetContext(shot: Shot, config: GlobalConfig): string {
-  const parts: string[] = [];
-  const relevantChars =
+function getBoundAssets(shot: Shot, config: GlobalConfig) {
+  const characters =
     shot.characterIds && shot.characterIds.length > 0
       ? config.characters.filter((c) => shot.characterIds?.includes(c.id))
       : [];
-  if (relevantChars.length > 0) parts.push(`角色: ${relevantChars.map((c) => `${c.name}(${c.description})`).join('，')}`);
+  const scenes =
+    shot.sceneIds && shot.sceneIds.length > 0 ? config.scenes.filter((s) => shot.sceneIds?.includes(s.id)) : [];
+  const props = shot.propIds && shot.propIds.length > 0 ? config.props.filter((p) => shot.propIds?.includes(p.id)) : [];
+  return { characters, scenes, props };
+}
 
-  const relevantScenes =
-    shot.sceneIds && shot.sceneIds.length > 0
-      ? config.scenes.filter((s) => shot.sceneIds?.includes(s.id))
-      : [];
-  if (relevantScenes.length > 0) parts.push(`场景: ${relevantScenes.map((s) => `${s.name}(${s.description})`).join('，')}`);
+function buildAssetInjection(shot: Shot, config: GlobalConfig): string {
+  const { characters, scenes, props } = getBoundAssets(shot, config);
+  const parts: string[] = [];
+  if (characters.length > 0) {
+    parts.push(...characters.map((c) => `[Character: ${c.name}, ${c.description}]`));
+  }
+  if (scenes.length > 0) {
+    parts.push(...scenes.map((s) => `[Environment: ${s.name}, ${s.description}]`));
+  }
+  if (props.length > 0) {
+    parts.push(...props.map((p) => `[Prop: ${p.name}, ${p.description}]`));
+  }
+  return parts.join(' ');
+}
 
-  const relevantProps =
-    shot.propIds && shot.propIds.length > 0 ? config.props.filter((p) => shot.propIds?.includes(p.id)) : [];
-  if (relevantProps.length > 0) parts.push(`道具: ${relevantProps.map((p) => `${p.name}(${p.description})`).join('，')}`);
-
-  return parts.join(' | ');
+function validateShotConsistency(shot: Shot, config: GlobalConfig) {
+  const { characters, scenes } = getBoundAssets(shot, config);
+  if (scenes.length === 0) {
+    throw new Error('POLICY_VIOLATION: Missing Scene Binding');
+  }
+  if (characters.length === 0 && shot.shotKind !== 'ENV') {
+    throw new Error('POLICY_VIOLATION: Missing Character Binding');
+  }
 }
 
 export async function breakdownScript(script: string, config: GlobalConfig) {
@@ -127,6 +142,7 @@ export async function breakdownScript(script: string, config: GlobalConfig) {
       ...s,
       status: 'pending',
       progress: 0,
+      shotKind: 'CHAR',
       characterIds: [],
       sceneIds: [],
       propIds: [],
@@ -171,10 +187,11 @@ export async function recommendAssets(shot: Shot, config: GlobalConfig): Promise
 
 export async function generateMatrixPrompts(shot: Shot, config: GlobalConfig): Promise<string[]> {
   const ai = getClient();
-  const assetContext = getShotAssetContext(shot, config);
+  const assetInjection = buildAssetInjection(shot, config);
+  const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
   const response = await ai.models.generateContent({
     model: TEXT_MODEL,
-    contents: `全局风格: ${config.artStyle}\n资产上下文: ${assetContext}\n镜头描述: ${shot.visualTranslation}`,
+    contents: `全局风格: ${config.artStyle}\n${assetLine}\n镜头描述: ${shot.visualTranslation}`,
     config: {
       systemInstruction: SYSTEM_INSTRUCTION_MATRIX,
       responseMimeType: 'application/json',
@@ -186,10 +203,11 @@ export async function generateMatrixPrompts(shot: Shot, config: GlobalConfig): P
 
 export async function optimizePrompts(shot: Shot, config: GlobalConfig) {
   const ai = getClient();
-  const assetContext = getShotAssetContext(shot, config);
+  const assetInjection = buildAssetInjection(shot, config);
+  const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
   const response = await ai.models.generateContent({
     model: TEXT_MODEL,
-    contents: `全局风格: ${config.artStyle}\n资产上下文: ${assetContext}\n镜头描述: ${shot.visualTranslation}\n当前 Prompts: ${JSON.stringify(
+    contents: `全局风格: ${config.artStyle}\n${assetLine}\n镜头描述: ${shot.visualTranslation}\n当前 Prompts: ${JSON.stringify(
       shot.matrixPrompts || [],
     )}`,
     config: {
@@ -226,8 +244,13 @@ export async function generateGridImage(shot: Shot, config: GlobalConfig): Promi
   const prompts = shot.matrixPrompts || [];
   if (prompts.length !== 9) throw new Error('matrixPrompts must have 9 prompts (Angle_01..Angle_09)');
 
+  validateShotConsistency(shot, config);
+  const assetInjection = buildAssetInjection(shot, config);
+  const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
+
   const compositePrompt = `${IMAGE_PRESET_PREFIX}
 全局风格: ${config.artStyle}
+${assetLine}
 一致性: 角色、场景、道具在 9 格中必须保持一致。
 
 九格内容分配：

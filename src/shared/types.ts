@@ -42,6 +42,7 @@ export interface Shot {
   originalText: string;
   visualTranslation: string;
   contextTag: string;
+  shotKind?: 'CHAR' | 'ENV' | 'POV' | 'INSERT' | 'MIXED';
   matrixPrompts?: string[]; // 9个机位的提示词 (作为生成母图的参数)
   generatedImageUrl?: string; // 3x3 矩阵母图
   splitImages?: string[]; // 物理切片后的9张图
