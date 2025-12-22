@@ -58,3 +58,15 @@
   - 将 `ready-to-show` 监听器注册前置于 `loadURL`。
   - 在 Dev 模式初始化块中增加 `mainWindow.show()` 显式兜底。
   - **状态**: 修复已验证，主窗口正常加载。
+
+## 2025-12-22: Phase 4 启动确认 (Product Polish)
+- **事件**: 完成 Phase 1-3 复盘与 Phase 4 计划锁定。
+- **确认项**:
+  - **前序闭环**: Electron 骨架、Provider IPC、窗口显示修复均已合并至 `main`。
+  - **Smoke Test**: Text -> Image 链路验证通过。
+  - **遗留决策**: 确认 preload 内联方案（Plan B）无需启用，维持现有 contextBridge 架构。
+- **计划锁定 (Phase 4)**:
+  - **Step 1 (Control)**: 配置 UI (Ratio/Resolution) + Video UX (状态/弹窗)。
+  - **Step 2 (Consistency)**: 资产一致性 V1 (Prompt 注入)。
+  - **Step 3 (Polish)**: 主题 + i18n。
+- **状态**: 正式启动 Phase 4 Step 1。
