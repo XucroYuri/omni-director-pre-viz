@@ -50,3 +50,11 @@
 - **处置**:
   - 使用 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ node node_modules/electron/install.js` 触发下载。
   - 在 `package.json` 的 `dev:electron` 中强制设置 `ELECTRON_RUN_AS_NODE=0` / `ELECTRON_FORCE_IS_PACKAGED=0` 防止再次误触。
+
+## 2025-12-22: 开发环境窗口显示修复 (fix/show-window-dev)
+- **事件**: `npm run dev` 启动后仅显示 DevTools，主窗口未弹出（无 UI）。
+- **原因**: Electron 的 `ready-to-show` 事件在 `loadURL` 异步执行期间可能已触发（Race Condition），且 Dev 模式下未兜底显式调用 `show()`。
+- **处置**:
+  - 将 `ready-to-show` 监听器注册前置于 `loadURL`。
+  - 在 Dev 模式初始化块中增加 `mainWindow.show()` 显式兜底。
+  - **状态**: 修复已验证，主窗口正常加载。
