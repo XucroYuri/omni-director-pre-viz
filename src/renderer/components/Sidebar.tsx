@@ -443,6 +443,41 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               </div>
 
+              <section className="bg-slate-500/5 rounded-xl border border-white/10 p-4">
+                <div className="flex items-center justify-between mb-4 cursor-pointer group" onClick={() => toggle('setup')}>
+                  <div className="flex items-center gap-2">
+                    <Filter size={14} className="text-slate-300" />
+                    <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">Output Config</span>
+                  </div>
+                  {expanded.setup ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                </div>
+                {expanded.setup && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                      Ratio
+                      <select
+                        className="mt-2 w-full bg-black/40 border border-white/10 rounded-lg py-2 px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40"
+                        value={config.aspectRatio}
+                        onChange={(e) => setConfig(p => ({ ...p, aspectRatio: e.target.value as GlobalConfig['aspectRatio'] }))}
+                      >
+                        <option value="16:9">16:9</option>
+                        <option value="9:16">9:16</option>
+                      </select>
+                    </label>
+                    <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                      Resolution
+                      <select
+                        className="mt-2 w-full bg-black/40 border border-white/10 rounded-lg py-2 px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40"
+                        value={config.resolution}
+                        onChange={(e) => setConfig(p => ({ ...p, resolution: e.target.value as GlobalConfig['resolution'] }))}
+                      >
+                        <option value="2K">2K</option>
+                      </select>
+                    </label>
+                  </div>
+                )}
+              </section>
+
               <section className="bg-indigo-500/5 rounded-xl border border-indigo-400/20 p-4">
                 <div className="flex items-center justify-between mb-4 cursor-pointer group" onClick={() => toggle('style')}>
                   <div className="flex items-center gap-2">

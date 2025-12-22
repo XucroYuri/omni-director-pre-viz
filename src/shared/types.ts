@@ -47,7 +47,7 @@ export interface Shot {
   splitImages?: string[]; // 物理切片后的9张图
   videoUrls?: (string | null)[]; // 9个视角对应的视频结果
   status: 'pending' | 'processing' | 'completed' | 'failed';
-  videoStatus?: ('idle' | 'processing' | 'completed' | 'failed')[];
+  videoStatus?: ('idle' | 'queued' | 'processing' | 'downloading' | 'completed' | 'failed')[];
   progress?: number; 
   history?: ShotHistoryItem[]; 
   optimization?: PromptOptimization; 
