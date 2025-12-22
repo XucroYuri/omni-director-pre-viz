@@ -1,5 +1,5 @@
 
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { Shot, GlobalConfig, Character, Scene, Prop, ShotHistoryItem } from '@shared/types';
 import { 
   Zap, RefreshCw, Wand2, Maximize2, User, Info, Check, X, Plus,
@@ -43,11 +43,16 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
   onAutoLinkAssets, isGeneratingImage, isOptimizing, isAutoLinking,
   isRebuildingCache
 }) => {
+  const shotRef = useRef(shot);
   const [showHistory, setShowHistory] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [discoveredAssets, setDiscoveredAssets] = useState<any[]>([]);
   const [isPromptingAll, setIsPromptingAll] = useState(false);
   const [activePreviewIndex, setActivePreviewIndex] = useState<number | null>(null);
+  const [videoModalIndex, setVideoModalIndex] = useState<number | null>(null);
+  const [videoPromptDraft, setVideoPromptDraft] = useState('');
+  const [syncVideoPrompt, setSyncVideoPrompt] = useState(true);
+  const videoTimersRef = useRef<Record<number, { processing?: ReturnType<typeof setTimeout>; downloading?: ReturnType<typeof setTimeout> }>>({});
 
   const prompts = shot.matrixPrompts || Array(9).fill('');
   const camNames = ['全景 (EST)', '过肩 (OTS)', '特写 (CU)', '中景 (MS)', '仰拍 (LOW)', '俯拍 (HI)', '侧面 (SIDE)', '极特写 (ECU)', '斜角 (DUTCH)'];
@@ -55,6 +60,10 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
   useEffect(() => {
     handleDiscoverAssets();
   }, [shot.id]);
+
+  useEffect(() => {
+    shotRef.current = shot;
+  }, [shot]);
 
   const handlePromptChange = (i: number, val: string) => {
     const next = [...prompts];
@@ -86,26 +95,63 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     } catch (err) { console.error(err); } finally { setIsScanning(false); }
   };
 
-  const handleCreateShotVideo = async (index: number) => {
-    if (!shot.splitImages || !shot.splitImages[index] || shot.videoStatus?.[index] === 'processing') return;
-
-    const nextStatus = [...(shot.videoStatus || Array(9).fill('idle'))];
-    nextStatus[index] = 'processing';
+  const setVideoStatus = (index: number, status: Shot['videoStatus'][number]) => {
+    const nextStatus = [...(shotRef.current.videoStatus || Array(9).fill('idle'))];
+    nextStatus[index] = status;
     onUpdateShot({ videoStatus: nextStatus });
+  };
+
+  const clearVideoTimers = (index: number) => {
+    const timers = videoTimersRef.current[index];
+    if (!timers) return;
+    if (timers.processing) clearTimeout(timers.processing);
+    if (timers.downloading) clearTimeout(timers.downloading);
+    delete videoTimersRef.current[index];
+  };
+
+  const scheduleVideoStages = (index: number) => {
+    clearVideoTimers(index);
+    const processing = setTimeout(() => {
+      const status = shotRef.current.videoStatus?.[index];
+      if (status === 'queued') setVideoStatus(index, 'processing');
+    }, 800);
+    const downloading = setTimeout(() => {
+      const status = shotRef.current.videoStatus?.[index];
+      if (status === 'queued' || status === 'processing') setVideoStatus(index, 'downloading');
+    }, 12000);
+    videoTimersRef.current[index] = { processing, downloading };
+  };
+
+  const handleCreateShotVideo = async (index: number, promptOverride?: string) => {
+    if (!shot.splitImages || !shot.splitImages[index]) return;
+    const status = shot.videoStatus?.[index];
+    if (status === 'queued' || status === 'processing' || status === 'downloading') return;
+
+    setVideoStatus(index, 'queued');
+    scheduleVideoStages(index);
 
     try {
-      const videoUrl = await generateShotVideo(shot.splitImages[index], prompts[index], config);
+      const prompt = (promptOverride || prompts[index] || shot.visualTranslation).trim();
+      const videoUrl = await generateShotVideo(shot.splitImages[index], prompt, config);
       const nextUrls = [...(shot.videoUrls || Array(9).fill(null))];
       nextUrls[index] = videoUrl;
-      const finalStatus = [...nextStatus];
+      clearVideoTimers(index);
+      const finalStatus = [...(shotRef.current.videoStatus || Array(9).fill('idle'))];
       finalStatus[index] = 'completed';
       onUpdateShot({ videoUrls: nextUrls, videoStatus: finalStatus });
     } catch (err) {
       console.error(err);
-      const finalStatus = [...nextStatus];
+      clearVideoTimers(index);
+      const finalStatus = [...(shotRef.current.videoStatus || Array(9).fill('idle'))];
       finalStatus[index] = 'failed';
       onUpdateShot({ videoStatus: finalStatus });
     }
+  };
+
+  const openVideoModal = (index: number) => {
+    setVideoModalIndex(index);
+    setVideoPromptDraft(prompts[index] || shot.visualTranslation);
+    setSyncVideoPrompt(true);
   };
 
   const handleBatchDownload = () => {
@@ -223,6 +269,15 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             const hasSlicing = !!shot.splitImages?.[idx];
             const videoUrl = shot.videoUrls?.[idx];
             const videoStatus = shot.videoStatus?.[idx] || 'idle';
+            const isVideoBusy = videoStatus === 'queued' || videoStatus === 'processing' || videoStatus === 'downloading';
+            const statusLabel = {
+              idle: 'Ready',
+              queued: 'Queued',
+              processing: 'Processing',
+              downloading: 'Downloading',
+              completed: 'Completed',
+              failed: 'Failed',
+            }[videoStatus];
 
             return (
               <div key={idx} className={`relative group rounded-xl border-2 transition-all duration-500 flex flex-col h-full bg-[#16191f] overflow-hidden ${hasSlicing ? 'border-indigo-500/10' : 'border-white/5 hover:border-indigo-500/30'}`}>
@@ -237,12 +292,12 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                 {hasSlicing && (
                   <div className="absolute top-2 right-2 z-30 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button 
-                      onClick={() => handleCreateShotVideo(idx)}
-                      disabled={videoStatus === 'processing'}
+                      onClick={() => openVideoModal(idx)}
+                      disabled={isVideoBusy}
                       className={`p-1.5 rounded-lg border border-white/10 backdrop-blur-md transition-all ${videoStatus === 'completed' ? 'bg-emerald-500 text-white' : 'bg-black/60 text-slate-200 hover:bg-indigo-600'}`}
                       title="生成视频预演 (Sora-2)"
                     >
-                      {videoStatus === 'processing' ? <Loader2 size={12} className="animate-spin"/> : <Video size={12}/>}
+                      {isVideoBusy ? <Loader2 size={12} className="animate-spin"/> : <Video size={12}/>}
                     </button>
                     <button 
                       onClick={() => setActivePreviewIndex(idx)}
@@ -261,10 +316,16 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                     ) : (
                       <img src={shot.splitImages![idx]} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
                     )}
-                    {videoStatus === 'processing' && (
+                    {(videoStatus === 'queued' || videoStatus === 'processing' || videoStatus === 'downloading') && (
                       <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
                         <Loader2 size={24} className="text-indigo-400 animate-spin" />
-                        <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">Veo Processing...</span>
+                        <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">{statusLabel}...</span>
+                      </div>
+                    )}
+                    {videoStatus === 'failed' && (
+                      <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-2">
+                        <AlertTriangle size={20} className="text-rose-400" />
+                        <span className="text-[9px] font-black text-rose-300 uppercase tracking-widest">Failed</span>
                       </div>
                     )}
                   </div>
@@ -312,7 +373,110 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                  </div>
                  <p className="text-slate-200 text-sm leading-relaxed italic">"{prompts[activePreviewIndex]}"</p>
               </div>
-           </div>
+          </div>
+        </div>
+      )}
+
+      {videoModalIndex !== null && (
+        <div className="fixed inset-0 z-[220] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="w-full max-w-4xl bg-[#141821] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-lg bg-indigo-500/20 text-indigo-300 flex items-center justify-center">
+                  <Film size={18} />
+                </div>
+                <div>
+                  <div className="text-[11px] font-black uppercase tracking-widest text-slate-300">Video Generation</div>
+                  <div className="text-[10px] text-slate-500">确认后开始调用 Sora-2</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setVideoModalIndex(null)}
+                className="p-2 rounded-full bg-white/5 hover:bg-white/10 transition-all"
+              >
+                <X size={16} className="text-slate-300" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 px-6 py-5">
+              <div className="space-y-4">
+                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Reference Frame</div>
+                <div className="aspect-video bg-black/40 border border-white/10 rounded-xl overflow-hidden">
+                  {shot.splitImages?.[videoModalIndex] ? (
+                    <img src={shot.splitImages[videoModalIndex]} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">No image</div>
+                  )}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Shot: SH_{shot.id.substring(0, 4)}</span>
+                  <span>{camNames[videoModalIndex]}</span>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Video Prompt</span>
+                  <button
+                    onClick={() => {
+                      setVideoPromptDraft(prompts[videoModalIndex] || shot.visualTranslation);
+                      setSyncVideoPrompt(true);
+                    }}
+                    className="text-[10px] font-black uppercase text-indigo-300 hover:text-indigo-200"
+                  >
+                    使用当前镜头 Prompt
+                  </button>
+                </div>
+                <textarea
+                  value={videoPromptDraft}
+                  onChange={(e) => setVideoPromptDraft(e.target.value)}
+                  className="w-full h-40 bg-black/40 border border-white/10 rounded-xl p-3 text-[11px] text-slate-200 outline-none resize-none focus:border-indigo-500/50 focus:bg-white/5"
+                  placeholder="为视频生成补充动作/镜头描述..."
+                />
+                <label className="flex items-center gap-2 text-[10px] text-slate-400">
+                  <input
+                    type="checkbox"
+                    checked={syncVideoPrompt}
+                    onChange={(e) => setSyncVideoPrompt(e.target.checked)}
+                    className="accent-indigo-500"
+                  />
+                  同步更新该机位的矩阵 Prompt
+                </label>
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[10px] text-amber-200">
+                  提示：视频生成耗时较长，建议确认提示词后再开始生成。
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between px-6 py-4 border-t border-white/10 bg-[#10131a]">
+              <div className="text-[10px] text-slate-500">
+                状态流转：Queued → Processing → Downloading → Completed
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setVideoModalIndex(null)}
+                  className="h-9 px-4 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={() => {
+                    const finalPrompt = videoPromptDraft.trim() || prompts[videoModalIndex] || shot.visualTranslation;
+                    if (syncVideoPrompt) {
+                      const next = [...prompts];
+                      next[videoModalIndex] = finalPrompt;
+                      onUpdatePrompts(next);
+                    }
+                    handleCreateShotVideo(videoModalIndex, finalPrompt);
+                    setVideoModalIndex(null);
+                  }}
+                  className="h-9 px-5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-400 text-[10px] font-black uppercase tracking-widest shadow-lg"
+                >
+                  确认生成
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

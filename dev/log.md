@@ -70,3 +70,11 @@
   - **Step 2 (Consistency)**: 资产一致性 V1 (Prompt 注入)。
   - **Step 3 (Polish)**: 主题 + i18n。
 - **状态**: 正式启动 Phase 4 Step 1。
+
+## 2025-12-22: Phase 4 Step 1 完成 (Control Implementation)
+- **事件**: 完成 Output Config 与 Video UX 的代码实现。
+- **变更**:
+  - `Sidebar.tsx`: 新增 Output Config 面板，支持 Ratio (16:9/9:16) 与 Resolution (2K) 切换。
+  - `MatrixPromptEditor.tsx`: 新增视频生成确认弹窗 (Prompt 二次编辑 + Sync 选项)；实现 queued -> processing -> downloading 状态流转 UI。
+  - `shared/types.ts`: 扩展 `videoStatus` 状态枚举。
+- **状态**: 代码已就绪，准备提交 PR `feat/phase4-step1-control`。
