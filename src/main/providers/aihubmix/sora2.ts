@@ -1,7 +1,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { GlobalConfig } from '../../../shared/types';
+import type { GlobalConfig, VideoGenerationParams } from '../../../shared/types';
 import { getAihubmixEnv } from './env';
 
 type SoraVideoStatus = 'queued' | 'in_progress' | 'completed' | 'failed' | string;
@@ -53,15 +53,72 @@ const VIDEO_PRESET_PREFIX = `[视频生成约束/不可省略]
 - 若提供参考图：把输入图片作为视频第一帧与主体/风格参考，保持角色/场景一致性
 `;
 
-export async function generateShotVideo(imageUri: string, prompt: string, config: GlobalConfig): Promise<string> {
+function buildAssetInjection(params: VideoGenerationParams, config: GlobalConfig): string {
+  const { shot } = params;
+  const characters =
+    shot.characterIds && shot.characterIds.length > 0
+      ? config.characters.filter((c) => shot.characterIds?.includes(c.id))
+      : [];
+  const scenes = shot.sceneIds && shot.sceneIds.length > 0 ? config.scenes.filter((s) => shot.sceneIds?.includes(s.id)) : [];
+  const props = shot.propIds && shot.propIds.length > 0 ? config.props.filter((p) => shot.propIds?.includes(p.id)) : [];
+
+  const parts: string[] = [];
+  if (characters.length > 0) parts.push(...characters.map((c) => `[Character: ${c.name}, ${c.description}]`));
+  if (scenes.length > 0) parts.push(...scenes.map((s) => `[Environment: ${s.name}, ${s.description}]`));
+  if (props.length > 0) parts.push(...props.map((p) => `[Prop: ${p.name}, ${p.description}]`));
+  return parts.join(' ');
+}
+
+function buildMatrixVideoPrompt(params: VideoGenerationParams, config: GlobalConfig): string {
+  const prompts = params.shot.matrixPrompts || [];
+  const assetInjection = buildAssetInjection(params, config);
+  const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
+
+  return `[矩阵分镜视频约束]
+- 输入为 3x3 母图（九格镜头）
+- 输出为连贯的动态分镜（Animatic），保持角色/场景/道具一致性
+- 镜头节奏从 Angle_01 到 Angle_09
+${assetLine}
+镜头描述: ${params.shot.visualTranslation}
+Angle_01: ${prompts[0] || ''}
+Angle_02: ${prompts[1] || ''}
+Angle_03: ${prompts[2] || ''}
+Angle_04: ${prompts[3] || ''}
+Angle_05: ${prompts[4] || ''}
+Angle_06: ${prompts[5] || ''}
+Angle_07: ${prompts[6] || ''}
+Angle_08: ${prompts[7] || ''}
+Angle_09: ${prompts[8] || ''}`.trim();
+}
+
+export async function generateShotVideo(params: VideoGenerationParams, config: GlobalConfig): Promise<string> {
   const env = getAihubmixEnv();
   const size = mapVideoSize(config.aspectRatio);
+
+  let prompt = params.prompt?.trim() || '';
+  let imageUri = params.imageUri;
+
+  if (params.inputMode === 'MATRIX_FRAME') {
+    imageUri = params.imageUri || params.shot.generatedImageUrl;
+    if (!imageUri) throw new Error('Matrix video requires generatedImageUrl');
+    prompt = buildMatrixVideoPrompt(params, config);
+  } else if (params.inputMode === 'IMAGE_FIRST_FRAME') {
+    if (!imageUri) throw new Error('Slot video requires input image');
+    if (!prompt) prompt = params.shot.visualTranslation;
+  } else if (params.inputMode === 'TEXT_ONLY') {
+    if (!prompt) prompt = params.shot.visualTranslation;
+  } else if (params.inputMode === 'ASSET_COLLAGE') {
+    if (!imageUri) throw new Error('Asset collage input not provided');
+    if (!prompt) prompt = params.shot.visualTranslation;
+  }
+
+  const duration = params.inputMode === 'MATRIX_FRAME' ? '8s' : '4s';
 
   const body: any = {
     model: 'sora-2',
     prompt: `${VIDEO_PRESET_PREFIX}\n${prompt}`,
     size,
-    duration: '4s',
+    duration,
   };
 
   if (imageUri) {

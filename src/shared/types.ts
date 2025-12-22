@@ -62,6 +62,14 @@ export interface Shot {
   lastAccessedAt?: number; 
 }
 
+export interface VideoGenerationParams {
+  inputMode: VideoInputMode;
+  shot: Shot;
+  prompt?: string;
+  imageUri?: string;
+  angleIndex?: number;
+}
+
 export type ApiProvider = 'aihubmix';
 
 export interface GlobalConfig {
