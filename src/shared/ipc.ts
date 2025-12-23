@@ -1,7 +1,18 @@
-import type { GlobalConfig, PromptOptimization, ScriptBreakdownResponse, Shot, VideoGenerationParams } from './types';
+import type {
+  ExportOptions,
+  ExportResult,
+  GlobalConfig,
+  PromptOptimization,
+  ScriptBreakdownResponse,
+  Shot,
+  VideoGenerationParams,
+} from './types';
 
 export const IPC_CHANNELS = {
   ping: 'app:ping',
+  app: {
+    exportEpisode: 'app:exportEpisode',
+  },
   ai: {
     breakdownScript: 'ai:breakdownScript',
     recommendAssets: 'ai:recommendAssets',
@@ -25,6 +36,9 @@ export type DiscoverMissingAssetsResult = {
 
 export type PreloadApi = {
   ping: () => Promise<string>;
+  app: {
+    exportEpisode: (options: ExportOptions) => Promise<ExportResult>;
+  };
   ai: {
     breakdownScript: (script: string, config: GlobalConfig) => Promise<ScriptBreakdownResponse>;
     recommendAssets: (shot: Shot, config: GlobalConfig) => Promise<RecommendAssetsResult>;

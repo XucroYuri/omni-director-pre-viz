@@ -5,7 +5,7 @@ import {
   Plus, User, Database, Palette, Sparkles, Loader2,
   ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen, Trash2, Box, Map,
   Search, X, Hash, Image as ImageIcon, Check, Filter, Tag as TagIcon, ArrowUpDown, SortAsc, SortDesc, Clock,
-  FileSearch, Download, Upload, FileJson, Info, FileText, Terminal, CheckCircle2, AlertCircle, Link2, Camera, Eraser, Wand2
+  FileSearch, Download, Upload, FileJson, Info, FileText, Terminal, CheckCircle2, AlertCircle, Link2, Camera, Eraser, Wand2, Package
 } from 'lucide-react';
 import { enhanceAssetDescription, generateAssetImage } from '../services/geminiService';
 
@@ -33,6 +33,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [sortOption, setSortOption] = useState<SortOption>('newest');
   const [isEnhancingId, setIsEnhancingId] = useState<string | null>(null);
   const [isGeneratingAssetId, setIsGeneratingAssetId] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [createZip, setCreateZip] = useState(false);
   const [expanded, setExpanded] = useState({ style: true, characters: true, scenes: true, props: true, setup: false });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -178,6 +180,40 @@ const Sidebar: React.FC<SidebarProps> = ({
       console.error("Asset generation failed", err);
     } finally {
       setIsGeneratingAssetId(null);
+    }
+  };
+
+  const handleExportEpisode = async () => {
+    if (isExporting) return;
+    if (!window.api?.app) {
+      alert('Export requires the Electron app runtime (window.api is not available).');
+      return;
+    }
+    const exportShots = shots.filter((shot) => shot.generatedImageUrl);
+    if (exportShots.length === 0) {
+      alert('没有可导出的镜头（请先生成母图）。');
+      return;
+    }
+
+    const episodeId = `EP_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+    setIsExporting(true);
+    try {
+      const result = await window.api.app.exportEpisode({
+        episodeId,
+        shots: exportShots,
+        config,
+        includeVideos: true,
+        createZip: createZip,
+      });
+      if (result.success) {
+        alert(`导出成功！\n路径: ${result.outputPath}\n${result.zipPath ? `ZIP: ${result.zipPath}` : ''}`);
+      } else {
+        alert(`导出失败: ${result.error}`);
+      }
+    } catch (err: any) {
+      alert(`系统错误: ${err.message || err}`);
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -515,6 +551,33 @@ const Sidebar: React.FC<SidebarProps> = ({
                   )}
                 </section>
               ))}
+
+              <section className="bg-slate-500/5 rounded-xl border border-white/10 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Package size={14} className="text-slate-300" />
+                  <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">Delivery</span>
+                </div>
+                <div className="flex items-center gap-2 mb-3 px-1">
+                  <input
+                    type="checkbox"
+                    id="createZip"
+                    checked={createZip}
+                    onChange={(e) => setCreateZip(e.target.checked)}
+                    className="w-3 h-3 accent-indigo-500 bg-transparent border-white/20 rounded cursor-pointer"
+                  />
+                  <label htmlFor="createZip" className="text-[10px] text-slate-400 cursor-pointer select-none">
+                    Create ZIP Package
+                  </label>
+                </div>
+                <button
+                  onClick={handleExportEpisode}
+                  disabled={isExporting}
+                  className="w-full h-9 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  Export Episode
+                </button>
+              </section>
             </div>
           </>
         )}
