@@ -17,7 +17,8 @@ type TaskPayload = {
 };
 
 export class TaskRunner {
-  async execute(task: DBTask): Promise<void> {
+  async execute(task: DBTask, signal?: AbortSignal): Promise<void> {
+    this.throwIfAborted(signal);
     const payload = this.parsePayload(task);
     const jobKind = payload.jobKind || (task.type === 'EXPORT' ? 'EXPORT_EPISODE' : undefined);
 
@@ -27,10 +28,11 @@ export class TaskRunner {
 
     switch (jobKind) {
       case 'MATRIX_GEN': {
+        this.throwIfAborted(signal);
         const shot = payload.shot as any;
         const config = payload.config as any;
         if (!shot || !config) throw new Error('MATRIX_GEN requires shot and config');
-        const { path: gridPath } = await generateGridImage(shot, config);
+        const { path: gridPath } = await generateGridImage(shot, config, signal);
         const splitPaths = await this.splitGridImage(gridPath, shot.id);
 
         const dbShot = shotRepo.get(shot.id);
@@ -46,6 +48,7 @@ export class TaskRunner {
         return;
       }
       case 'VIDEO_GEN': {
+        this.throwIfAborted(signal);
         const paramsPayload =
           payload.params && typeof payload.params === 'object'
             ? (payload.params as Record<string, unknown>)
@@ -60,7 +63,7 @@ export class TaskRunner {
         if (payload.params && payload.config) {
           const params = payload.params as VideoGenerationParams;
           const config = payload.config as any;
-          const { path } = await generateShotVideo(params, config);
+          const { path } = await generateShotVideo(params, config, signal);
           task.result_json = JSON.stringify({ path });
           const shotId = params?.shot?.id as string | undefined;
           if (shotId) {
@@ -89,19 +92,20 @@ export class TaskRunner {
           params.imageUri = imageUri;
         }
 
-        const { path } = await generateShotVideo(params, episode.config);
+        const { path } = await generateShotVideo(params, episode.config, signal);
         task.result_json = JSON.stringify({ path });
         this.updateShotVideoPath(shotId, inputMode, angleIndex, path);
         return;
       }
       case 'ASSET_GEN': {
+        this.throwIfAborted(signal);
         const assetId =
           (payload.assetId ?? payload.asset_id ?? payload.id) as string | undefined;
         const name = payload.name as string | undefined;
         const description = payload.description as string | undefined;
         const config = payload.config as any;
         if (!assetId || !name || !config) throw new Error('ASSET_GEN requires assetId, name, and config');
-        const { path } = await generateAssetImage(name, description || '', config);
+        const { path } = await generateAssetImage(name, description || '', config, signal);
         const asset = assetRepo.get(assetId);
         if (!asset) throw new Error(`Asset not found: ${assetId}`);
         assetRepo.upsert({
@@ -113,6 +117,7 @@ export class TaskRunner {
         return;
       }
       case 'EXPORT_EPISODE': {
+        this.throwIfAborted(signal);
         const options = (payload.options ?? payload) as any;
         if (!options) throw new Error('EXPORT_EPISODE requires options');
         const result = await exportEpisode(options);
@@ -208,5 +213,12 @@ export class TaskRunner {
     } catch {
       return fallback;
     }
+  }
+
+  private throwIfAborted(signal?: AbortSignal): void {
+    if (!signal?.aborted) return;
+    const error = new Error('Aborted');
+    (error as Error & { name?: string }).name = 'AbortError';
+    throw error;
   }
 }

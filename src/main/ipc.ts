@@ -31,6 +31,8 @@ export function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.app.db.loadEpisode, async (_evt, episodeId) => dbService.loadEpisode(episodeId));
   ipcMain.handle(IPC_CHANNELS.app.task.submit, async (_evt, task) => taskQueue.enqueue(task));
   ipcMain.handle(IPC_CHANNELS.app.task.list, async () => taskQueue.list());
+  ipcMain.handle(IPC_CHANNELS.app.task.cancel, async (_evt, taskId) => taskQueue.cancelTask(taskId));
+  ipcMain.handle(IPC_CHANNELS.app.task.retry, async (_evt, taskId) => taskQueue.retryTask(taskId));
 
   ipcMain.handle(IPC_CHANNELS.ai.breakdownScript, async (_evt, script, config) => limiters.llm(() => breakdownScript(script, config)));
   ipcMain.handle(IPC_CHANNELS.ai.recommendAssets, async (_evt, shot, config) => limiters.llm(() => recommendAssets(shot, config)));
