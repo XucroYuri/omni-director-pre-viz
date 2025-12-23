@@ -2,7 +2,9 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { GlobalConfig, VideoGenerationParams } from '../../../shared/types';
+import { buildAssetInjection } from '../../../shared/utils';
 import { getAihubmixEnv } from './env';
+import { createAssetCollage } from '../../services/assetCollage';
 
 type SoraVideoStatus = 'queued' | 'in_progress' | 'completed' | 'failed' | string;
 
@@ -53,25 +55,9 @@ const VIDEO_PRESET_PREFIX = `[视频生成约束/不可省略]
 - 若提供参考图：把输入图片作为视频第一帧与主体/风格参考，保持角色/场景一致性
 `;
 
-function buildAssetInjection(params: VideoGenerationParams, config: GlobalConfig): string {
-  const { shot } = params;
-  const characters =
-    shot.characterIds && shot.characterIds.length > 0
-      ? config.characters.filter((c) => shot.characterIds?.includes(c.id))
-      : [];
-  const scenes = shot.sceneIds && shot.sceneIds.length > 0 ? config.scenes.filter((s) => shot.sceneIds?.includes(s.id)) : [];
-  const props = shot.propIds && shot.propIds.length > 0 ? config.props.filter((p) => shot.propIds?.includes(p.id)) : [];
-
-  const parts: string[] = [];
-  if (characters.length > 0) parts.push(...characters.map((c) => `[Character: ${c.name}, ${c.description}]`));
-  if (scenes.length > 0) parts.push(...scenes.map((s) => `[Environment: ${s.name}, ${s.description}]`));
-  if (props.length > 0) parts.push(...props.map((p) => `[Prop: ${p.name}, ${p.description}]`));
-  return parts.join(' ');
-}
-
 function buildMatrixVideoPrompt(params: VideoGenerationParams, config: GlobalConfig): string {
   const prompts = params.shot.matrixPrompts || [];
-  const assetInjection = buildAssetInjection(params, config);
+  const assetInjection = buildAssetInjection(params.shot, config);
   const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
 
   return `[矩阵分镜视频约束]
@@ -108,8 +94,13 @@ export async function generateShotVideo(params: VideoGenerationParams, config: G
   } else if (params.inputMode === 'TEXT_ONLY') {
     if (!prompt) prompt = params.shot.visualTranslation;
   } else if (params.inputMode === 'ASSET_COLLAGE') {
-    if (!imageUri) throw new Error('Asset collage input not provided');
+    if (!imageUri) {
+      const collage = await createAssetCollage(params.shot, config);
+      imageUri = `data:image/png;base64,${collage.toString('base64')}`;
+    }
     if (!prompt) prompt = params.shot.visualTranslation;
+    const assetInjection = buildAssetInjection(params.shot, config);
+    if (assetInjection) prompt = `${prompt}\n${assetInjection}`;
   }
 
   const duration = params.inputMode === 'MATRIX_FRAME' ? '8s' : '4s';

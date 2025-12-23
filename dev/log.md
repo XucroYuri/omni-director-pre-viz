@@ -86,4 +86,19 @@
   - 标准化视频输入模式: `TEXT_ONLY` / `IMAGE_FIRST_FRAME` (Slot) / `MATRIX_FRAME` (Animatic) / `ASSET_COLLAGE`。
   - 扩展 `Shot` 类型: 新增 `VideoInputMode` 及 `animaticVideoUrl`。
   - 规划新入口: Renderer 端新增 "Generate Animatic" 按钮。
-- **状态**: 规范文档 `dev/Phase4-Step2-Revised-Spec.md` 已创建，等待 C 队执行。
+- **状态**: 规范文档 `dev/Phase4-Step2-Revised-Spec.md` 已创建，Step 2 Revised 代码已合并至 `main`。
+
+## 2025-12-22: Phase 4 Step 2 (Revised) 完成 (Multimodal Consistency)
+- **事件**: 完成多模态一致性架构升级与 Matrix Animatic 功能落地。
+- **成果**:
+  - **架构升级**: 引入 `VideoInputMode`，支持 `MATRIX_FRAME` (母图视频) 与 `ASSET_COLLAGE` (预埋)。
+  - **核心功能**: 实现 "Generate Animatic" 按钮，一键生成 8s 动态分镜；实现 Policy Violation 拦截 (强制绑定资产)。
+  - **代码清理**: 废弃旧的一致性分支，合并至 `feat/phase4-step2-revised`。
+- **状态**: PR 已合并，Smoke Test 通过。
+
+## 2025-12-22: Hotfix (Window Display Regression)
+- **事件**: Step 2 合并后发现 Dev 模式下主窗口不显示 (仅 DevTools)。
+- **原因**: `main.ts` 中的 `ready-to-show` 监听顺序在合并中被回滚。
+- **处置**: 提交 `fix/show-window-dev-regression`，前置监听并强制 `show()`。
+- **状态**: 已合并，环境恢复正常。
+

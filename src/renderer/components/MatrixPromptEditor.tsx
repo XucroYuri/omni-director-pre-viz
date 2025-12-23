@@ -54,6 +54,8 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
   const [syncVideoPrompt, setSyncVideoPrompt] = useState(true);
   const [isGeneratingAnimatic, setIsGeneratingAnimatic] = useState(false);
   const [showAnimaticPreview, setShowAnimaticPreview] = useState(false);
+  const [isGeneratingAssetVideo, setIsGeneratingAssetVideo] = useState(false);
+  const [showAssetVideoPreview, setShowAssetVideoPreview] = useState(false);
   const videoTimersRef = useRef<Record<number, { processing?: ReturnType<typeof setTimeout>; downloading?: ReturnType<typeof setTimeout> }>>({});
 
   const prompts = shot.matrixPrompts || Array(9).fill('');
@@ -62,6 +64,8 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
   const boundScenes = config.scenes.filter((s) => shot.sceneIds?.includes(s.id));
   const boundProps = config.props.filter((p) => shot.propIds?.includes(p.id));
   const hasBoundAssets = boundCharacters.length + boundScenes.length + boundProps.length > 0;
+  const hasAssetRefs =
+    boundCharacters.some((c) => c.refImage) || boundScenes.some((s) => s.refImage) || boundProps.some((p) => p.refImage);
 
   useEffect(() => {
     handleDiscoverAssets();
@@ -183,6 +187,26 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
       setIsGeneratingAnimatic(false);
     }
   };
+
+  const handleGenerateAssetVideo = async () => {
+    if (isGeneratingAssetVideo || !hasAssetRefs) return;
+    setIsGeneratingAssetVideo(true);
+    try {
+      const videoUrl = await generateShotVideo(
+        {
+          inputMode: 'ASSET_COLLAGE',
+          shot,
+        },
+        config,
+      );
+      onUpdateShot({ assetVideoUrl: videoUrl });
+      setShowAssetVideoPreview(true);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsGeneratingAssetVideo(false);
+    }
+  };
   const openVideoModal = (index: number) => {
     setVideoModalIndex(index);
     setVideoPromptDraft(prompts[index] || shot.visualTranslation);
@@ -290,6 +314,20 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
           >
             {isGeneratingAnimatic ? <Loader2 size={14} className="animate-spin" /> : <Film size={14} />}
             {shot.animaticVideoUrl ? 'Animatic Preview' : 'Generate Animatic'}
+          </button>
+          <button
+            onClick={() => {
+              if (shot.assetVideoUrl) {
+                setShowAssetVideoPreview(true);
+              } else {
+                handleGenerateAssetVideo();
+              }
+            }}
+            disabled={!hasAssetRefs || isGeneratingAssetVideo}
+            className="h-9 px-4 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+          >
+            {isGeneratingAssetVideo ? <Loader2 size={14} className="animate-spin" /> : <Layers size={14} />}
+            {shot.assetVideoUrl ? 'Asset Video Preview' : 'Asset Video'}
           </button>
           <button onClick={handleBatchDownload} disabled={!shot.splitImages} className="h-9 px-4 bg-white/5 border border-white/10 text-slate-400 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2">
             <Download size={14} /> Download All
@@ -488,6 +526,28 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             <div className="bg-white/5 backdrop-blur-xl p-6 rounded-2xl border border-white/10 w-full">
               <div className="flex items-center gap-3 mb-2">
                 <span className="px-3 py-1 bg-indigo-500 text-white text-[10px] font-black rounded-lg uppercase">Animatic</span>
+                <span className="text-slate-500 text-xs font-mono">SHOT: {shot.id}</span>
+              </div>
+              <p className="text-slate-200 text-sm leading-relaxed italic">"{shot.visualTranslation}"</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAssetVideoPreview && shot.assetVideoUrl && (
+        <div className="fixed inset-0 bg-black/95 z-[215] flex items-center justify-center p-10" onClick={() => setShowAssetVideoPreview(false)}>
+          <div className="relative w-full h-full max-w-6xl flex flex-col items-center gap-6" onClick={(e) => e.stopPropagation()}>
+            <div className="absolute top-0 right-0 p-4">
+              <button onClick={() => setShowAssetVideoPreview(false)} className="p-3 bg-white/10 rounded-full hover:bg-white/20 transition-all">
+                <X size={24} className="text-white" />
+              </button>
+            </div>
+            <div className="flex-1 w-full bg-black rounded-3xl overflow-hidden border border-white/10 shadow-[0_0_80px_rgba(16,185,129,0.25)]">
+              <video src={shot.assetVideoUrl} className="w-full h-full object-contain" controls autoPlay />
+            </div>
+            <div className="bg-white/5 backdrop-blur-xl p-6 rounded-2xl border border-white/10 w-full">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="px-3 py-1 bg-emerald-500 text-white text-[10px] font-black rounded-lg uppercase">Asset Video</span>
                 <span className="text-slate-500 text-xs font-mono">SHOT: {shot.id}</span>
               </div>
               <p className="text-slate-200 text-sm leading-relaxed italic">"{shot.visualTranslation}"</p>

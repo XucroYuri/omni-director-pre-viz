@@ -50,6 +50,7 @@ export interface Shot {
   splitImages?: string[]; // 物理切片后的9张图
   videoUrls?: (string | null)[]; // 9个视角对应的视频结果
   animaticVideoUrl?: string; // 基于 3x3 母图生成的动态分镜视频 (Matrix Video)
+  assetVideoUrl?: string; // 基于资产拼贴图生成的视频 (Asset Video)
   status: 'pending' | 'processing' | 'completed' | 'failed';
   videoStatus?: ('idle' | 'queued' | 'processing' | 'downloading' | 'completed' | 'failed')[];
   progress?: number; 
