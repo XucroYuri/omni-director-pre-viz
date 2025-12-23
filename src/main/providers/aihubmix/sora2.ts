@@ -26,6 +26,36 @@ function parseDataUri(dataUri: string) {
   return { mimeType: match[1], base64: match[2] };
 }
 
+function createAbortError(): Error {
+  const error = new Error('Aborted');
+  (error as Error & { name?: string }).name = 'AbortError';
+  return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw createAbortError();
+}
+
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    return;
+  }
+  if (signal.aborted) throw createAbortError();
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      reject(createAbortError());
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 async function httpJson<T>(url: string, init: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   const text = await res.text();
@@ -80,7 +110,9 @@ Angle_09: ${prompts[8] || ''}`.trim();
 export async function generateShotVideo(
   params: VideoGenerationParams,
   config: GlobalConfig,
+  signal?: AbortSignal,
 ): Promise<{ path: string; dataUri: string }> {
+  throwIfAborted(signal);
   const env = getAihubmixEnv();
   const size = mapVideoSize(config.aspectRatio);
 
@@ -98,6 +130,7 @@ export async function generateShotVideo(
     if (!prompt) prompt = params.shot.visualTranslation;
   } else if (params.inputMode === 'ASSET_COLLAGE') {
     if (!imageUri) {
+      throwIfAborted(signal);
       const collage = await createAssetCollage(params.shot, config);
       imageUri = `data:image/png;base64,${collage.toString('base64')}`;
     }
@@ -129,6 +162,7 @@ export async function generateShotVideo(
     method: 'POST',
     headers,
     body: JSON.stringify(body),
+    signal,
   });
 
   let video: RetrieveVideoResponse = { id: created.id, status: created.status };
@@ -136,11 +170,14 @@ export async function generateShotVideo(
   const timeoutMs = 10 * 60 * 1000;
 
   while (video.status === 'queued' || video.status === 'in_progress') {
+    throwIfAborted(signal);
     if (Date.now() - startedAt > timeoutMs) throw new Error('Video generation timed out');
-    await new Promise((r) => setTimeout(r, 5000));
+    await sleep(5000, signal);
+    throwIfAborted(signal);
     video = await httpJson<RetrieveVideoResponse>(`${env.openaiBaseUrl}/videos/${video.id}`, {
       method: 'GET',
       headers,
+      signal,
     });
   }
 
@@ -152,7 +189,8 @@ export async function generateShotVideo(
   let bytes: Uint8Array | null = null;
   for (const url of contentUrls) {
     try {
-      bytes = await httpBytes(url, { method: 'GET', headers });
+      throwIfAborted(signal);
+      bytes = await httpBytes(url, { method: 'GET', headers, signal });
       break;
     } catch {
       // try next

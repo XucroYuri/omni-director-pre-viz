@@ -22,6 +22,8 @@ export const IPC_CHANNELS = {
       submit: 'app:task:submit',
       list: 'app:task:list',
       update: 'app:task:update',
+      cancel: 'app:task:cancel',
+      retry: 'app:task:retry',
     },
   },
   ai: {
@@ -56,6 +58,8 @@ export type PreloadApi = {
     task: {
       submit: (task: DBTask) => Promise<void>;
       list: () => Promise<DBTask[]>;
+      cancel: (taskId: string) => Promise<void>;
+      retry: (taskId: string) => Promise<void>;
       onUpdate: (callback: (task: DBTask) => void) => void;
       offUpdate: (callback: (task: DBTask) => void) => void;
     };

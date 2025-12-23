@@ -17,6 +17,8 @@ const api: PreloadApi = {
     task: {
       submit: (task) => ipcRenderer.invoke(IPC_CHANNELS.app.task.submit, task),
       list: () => ipcRenderer.invoke(IPC_CHANNELS.app.task.list),
+      cancel: (taskId) => ipcRenderer.invoke(IPC_CHANNELS.app.task.cancel, taskId),
+      retry: (taskId) => ipcRenderer.invoke(IPC_CHANNELS.app.task.retry, taskId),
       onUpdate: (callback) => {
         const existing = taskUpdateHandlers.get(callback);
         if (existing) {

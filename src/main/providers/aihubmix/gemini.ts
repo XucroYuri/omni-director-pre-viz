@@ -217,6 +217,7 @@ const IMAGE_PRESET_PREFIX = `[生成约束/不可省略]
 export async function generateGridImage(
   shot: Shot,
   config: GlobalConfig,
+  signal?: AbortSignal,
 ): Promise<{ path: string; dataUri: string }> {
   const ai = getClient();
   const prompts = shot.matrixPrompts || [];
@@ -274,6 +275,7 @@ Angle_09: ${prompts[8]}
     config: {
       responseModalities: ['TEXT', 'IMAGE'],
       imageConfig: { aspectRatio: config.aspectRatio, imageSize: config.resolution as any },
+      abortSignal: signal,
     },
   });
 
@@ -306,6 +308,7 @@ export async function generateAssetImage(
   name: string,
   description: string,
   config: GlobalConfig,
+  signal?: AbortSignal,
 ): Promise<{ path: string; dataUri: string }> {
   const ai = getClient();
   const prompt = `${IMAGE_PRESET_PREFIX}\n[概念设计图]\n全局风格: ${config.artStyle}\n主体: ${name}\n细节: ${description}`;
@@ -316,6 +319,7 @@ export async function generateAssetImage(
     config: {
       responseModalities: ['TEXT', 'IMAGE'],
       imageConfig: { aspectRatio: '1:1', imageSize: '1K' as any },
+      abortSignal: signal,
     },
   });
 

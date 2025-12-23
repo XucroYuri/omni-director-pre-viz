@@ -615,7 +615,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               </section>
 
-              <TaskPanel />
+              <div className="min-w-0">
+                <TaskPanel />
+              </div>
             </div>
           </>
         )}
