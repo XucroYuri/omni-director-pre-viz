@@ -12,6 +12,7 @@ import {
   recommendAssets,
 } from './providers/aihubmix/gemini';
 import { generateShotVideo } from './providers/aihubmix/sora2';
+import { dbService } from './services/dbService';
 import { exportEpisode } from './services/exportService';
 
 let registered = false;
@@ -25,6 +26,8 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle(IPC_CHANNELS.app.exportEpisode, async (_evt, options) => exportEpisode(options));
+  ipcMain.handle(IPC_CHANNELS.app.db.saveEpisode, async (_evt, data) => dbService.saveEpisodeFull(data));
+  ipcMain.handle(IPC_CHANNELS.app.db.loadEpisode, async (_evt, episodeId) => dbService.loadEpisode(episodeId));
 
   ipcMain.handle(IPC_CHANNELS.ai.breakdownScript, async (_evt, script, config) => limiters.llm(() => breakdownScript(script, config)));
   ipcMain.handle(IPC_CHANNELS.ai.recommendAssets, async (_evt, shot, config) => limiters.llm(() => recommendAssets(shot, config)));

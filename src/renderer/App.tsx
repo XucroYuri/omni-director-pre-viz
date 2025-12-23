@@ -16,7 +16,8 @@ const STORAGE_KEYS = {
   CONFIG: 'OMNI_DIRECTOR_CONFIG',
   SCRIPT: 'OMNI_DIRECTOR_SCRIPT',
   BREAKDOWN: 'OMNI_DIRECTOR_BREAKDOWN',
-  SELECTED_SHOT_ID: 'OMNI_DIRECTOR_SELECTED_ID'
+  SELECTED_SHOT_ID: 'OMNI_DIRECTOR_SELECTED_ID',
+  EPISODE_ID: 'OMNI_DIRECTOR_EPISODE_ID'
 };
 
 const App: React.FC = () => {
@@ -40,6 +41,11 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : null;
   });
   const [selectedShotId, setSelectedShotId] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.SELECTED_SHOT_ID) || null);
+  const [episodeId, setEpisodeId] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.EPISODE_ID);
+    if (saved) return saved;
+    return `ep_${Date.now()}`;
+  });
 
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
@@ -61,6 +67,7 @@ const App: React.FC = () => {
   useEffect(() => { 
     if (breakdown) localStorage.setItem(STORAGE_KEYS.BREAKDOWN, JSON.stringify(breakdown));
   }, [breakdown]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.EPISODE_ID, episodeId); }, [episodeId]);
 
   const updateShot = (id: string, updates: Partial<Shot>) => {
     setBreakdown(prev => {
@@ -122,6 +129,54 @@ const App: React.FC = () => {
     } finally { setIsLoading(false); }
   };
 
+  const handleSaveEpisode = async () => {
+    if (!window.api?.app?.db) {
+      alert('DB 功能仅在 Electron 环境可用。');
+      return;
+    }
+    const shots = breakdown?.shots || [];
+    const data = {
+      episodeId,
+      config,
+      shots,
+      assets: {
+        characters: config.characters,
+        scenes: config.scenes,
+        props: config.props,
+      },
+    };
+    try {
+      await window.api.app.db.saveEpisode(data);
+      alert('保存成功（Save to DB）。');
+    } catch (error: any) {
+      alert(`保存失败: ${error?.message || error}`);
+    }
+  };
+
+  const handleLoadEpisode = async () => {
+    if (!window.api?.app?.db) {
+      alert('DB 功能仅在 Electron 环境可用。');
+      return;
+    }
+    try {
+      const data = await window.api.app.db.loadEpisode(episodeId);
+      if (!data) {
+        alert('未找到对应 Episode。');
+        return;
+      }
+      setConfig(data.config);
+      setBreakdown({
+        context: '',
+        shots: data.shots,
+        characters: data.assets.characters.map((c) => ({ name: c.name, description: c.description })),
+      });
+      setSelectedShotId(data.shots[0]?.id || null);
+      setApiStatus('connected');
+    } catch (error: any) {
+      alert(`读取失败: ${error?.message || error}`);
+    }
+  };
+
   return (
     <div className="flex h-screen w-full bg-[#0f1115] text-slate-300 overflow-hidden font-sans">
       <Sidebar 
@@ -131,6 +186,10 @@ const App: React.FC = () => {
         setSelectedShotId={setSelectedShotId} 
         isLoading={isLoading} script={script} setScript={setScript} 
         handleBreakdown={handleBreakdown}
+        episodeId={episodeId}
+        setEpisodeId={setEpisodeId}
+        onSaveEpisode={handleSaveEpisode}
+        onLoadEpisode={handleLoadEpisode}
       />
       <div className="flex-1 flex flex-col">
         <header className="h-14 border-b border-white/10 flex items-center justify-between px-6 bg-[#16191f]/80 backdrop-blur-md">

@@ -1,4 +1,5 @@
 import type {
+  EpisodeData,
   ExportOptions,
   ExportResult,
   GlobalConfig,
@@ -12,6 +13,10 @@ export const IPC_CHANNELS = {
   ping: 'app:ping',
   app: {
     exportEpisode: 'app:exportEpisode',
+    db: {
+      saveEpisode: 'app:db:saveEpisode',
+      loadEpisode: 'app:db:loadEpisode',
+    },
   },
   ai: {
     breakdownScript: 'ai:breakdownScript',
@@ -38,6 +43,10 @@ export type PreloadApi = {
   ping: () => Promise<string>;
   app: {
     exportEpisode: (options: ExportOptions) => Promise<ExportResult>;
+    db: {
+      saveEpisode: (data: EpisodeData) => Promise<void>;
+      loadEpisode: (episodeId: string) => Promise<EpisodeData | null>;
+    };
   };
   ai: {
     breakdownScript: (script: string, config: GlobalConfig) => Promise<ScriptBreakdownResponse>;

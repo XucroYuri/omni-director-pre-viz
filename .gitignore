@@ -13,6 +13,7 @@ dist-ssr
 *.local
 output
 tmp
+temp_verification_out
 
 # Editor directories and files
 .vscode/*

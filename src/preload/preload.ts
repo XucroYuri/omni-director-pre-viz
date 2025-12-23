@@ -5,6 +5,10 @@ const api: PreloadApi = {
   ping: () => ipcRenderer.invoke(IPC_CHANNELS.ping),
   app: {
     exportEpisode: (options) => ipcRenderer.invoke(IPC_CHANNELS.app.exportEpisode, options),
+    db: {
+      saveEpisode: (data) => ipcRenderer.invoke(IPC_CHANNELS.app.db.saveEpisode, data),
+      loadEpisode: (episodeId) => ipcRenderer.invoke(IPC_CHANNELS.app.db.loadEpisode, episodeId),
+    },
   },
   ai: {
     breakdownScript: (script, config) => ipcRenderer.invoke(IPC_CHANNELS.ai.breakdownScript, script, config),
