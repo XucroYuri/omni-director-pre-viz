@@ -128,3 +128,14 @@ export interface ScriptBreakdownResponse {
   shots: Shot[];
   characters: { name: string; description: string }[];
 }
+
+export interface EpisodeData {
+  episodeId: string;
+  config: GlobalConfig;
+  shots: Shot[];
+  assets: {
+    characters: Character[];
+    scenes: Scene[];
+    props: Prop[];
+  };
+}

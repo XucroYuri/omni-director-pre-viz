@@ -19,13 +19,17 @@ interface SidebarProps {
   script: string;
   setScript: (s: string) => void;
   handleBreakdown: () => void;
+  episodeId: string;
+  setEpisodeId: (id: string) => void;
+  onSaveEpisode: () => void;
+  onLoadEpisode: () => void;
 }
 
 type SortOption = 'name' | 'newest';
 
 const Sidebar: React.FC<SidebarProps> = ({ 
   config, setConfig, shots, selectedShotId, setSelectedShotId, 
-  isLoading, script, setScript, handleBreakdown 
+  isLoading, script, setScript, handleBreakdown, episodeId, setEpisodeId, onSaveEpisode, onLoadEpisode
 }) => {
   const [collapsed, setCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -577,6 +581,37 @@ const Sidebar: React.FC<SidebarProps> = ({
                   {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                   Export Episode
                 </button>
+              </section>
+
+              <section className="bg-slate-500/5 rounded-xl border border-white/10 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Database size={14} className="text-slate-300" />
+                  <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">Database</span>
+                </div>
+                <div className="mb-3">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-500">
+                    Episode ID
+                  </label>
+                  <input
+                    value={episodeId}
+                    onChange={(e) => setEpisodeId(e.target.value)}
+                    className="mt-2 w-full bg-black/40 border border-white/10 rounded-lg py-2 px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={onLoadEpisode}
+                    className="h-9 bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+                  >
+                    Import
+                  </button>
+                  <button
+                    onClick={onSaveEpisode}
+                    className="h-9 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+                  >
+                    Save
+                  </button>
+                </div>
               </section>
             </div>
           </>

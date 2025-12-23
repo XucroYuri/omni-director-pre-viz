@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from 'electron';
 import * as path from 'node:path';
+import { initDatabase } from './db';
 import { registerIpcHandlers } from './ipc';
 import { loadLocalEnvFiles } from './loadEnv';
 
@@ -49,6 +50,7 @@ async function createMainWindow() {
 
 app.whenReady().then(async () => {
   loadLocalEnvFiles();
+  initDatabase();
   await createMainWindow();
 
   app.on('activate', async () => {
