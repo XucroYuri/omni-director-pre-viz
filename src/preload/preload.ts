@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { IpcRendererEvent } from 'electron';
 import { IPC_CHANNELS, type PreloadApi } from '../shared/ipc';
+import type { DBTask } from '../shared/types';
+
+type TaskUpdateCallback = (task: DBTask) => void;
+const taskUpdateHandlers = new Map<TaskUpdateCallback, (event: IpcRendererEvent, task: DBTask) => void>();
 
 const api: PreloadApi = {
   ping: () => ipcRenderer.invoke(IPC_CHANNELS.ping),
@@ -8,6 +13,25 @@ const api: PreloadApi = {
     db: {
       saveEpisode: (data) => ipcRenderer.invoke(IPC_CHANNELS.app.db.saveEpisode, data),
       loadEpisode: (episodeId) => ipcRenderer.invoke(IPC_CHANNELS.app.db.loadEpisode, episodeId),
+    },
+    task: {
+      submit: (task) => ipcRenderer.invoke(IPC_CHANNELS.app.task.submit, task),
+      list: () => ipcRenderer.invoke(IPC_CHANNELS.app.task.list),
+      onUpdate: (callback) => {
+        const existing = taskUpdateHandlers.get(callback);
+        if (existing) {
+          ipcRenderer.off(IPC_CHANNELS.app.task.update, existing);
+        }
+        const handler = (_event: IpcRendererEvent, task: DBTask) => callback(task);
+        taskUpdateHandlers.set(callback, handler);
+        ipcRenderer.on(IPC_CHANNELS.app.task.update, handler);
+      },
+      offUpdate: (callback) => {
+        const handler = taskUpdateHandlers.get(callback);
+        if (!handler) return;
+        ipcRenderer.off(IPC_CHANNELS.app.task.update, handler);
+        taskUpdateHandlers.delete(callback);
+      },
     },
   },
   ai: {

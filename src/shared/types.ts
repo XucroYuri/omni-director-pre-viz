@@ -139,3 +139,37 @@ export interface EpisodeData {
     props: Prop[];
   };
 }
+
+export type TaskType = 'LLM' | 'IMAGE' | 'VIDEO' | 'EXPORT';
+
+export type TaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type JobKind =
+  | 'MATRIX_GEN'
+  | 'MATRIX_SLICE'
+  | 'VIDEO_GEN'
+  | 'ASSET_GEN'
+  | 'EXPORT_EPISODE';
+
+export type TaskPayload =
+  | { jobKind: 'MATRIX_GEN'; [key: string]: unknown }
+  | { jobKind: 'MATRIX_SLICE'; [key: string]: unknown }
+  | { jobKind: 'VIDEO_GEN'; [key: string]: unknown }
+  | { jobKind: 'ASSET_GEN'; [key: string]: unknown }
+  | { jobKind: 'EXPORT_EPISODE'; [key: string]: unknown };
+
+export type TaskResult = { outputPath?: string; [key: string]: unknown };
+
+export interface DBTask {
+  id: string;
+  episode_id: string;
+  shot_id: string | null;
+  type: TaskType;
+  status: TaskStatus;
+  progress: number | null;
+  payload_json: string;
+  result_json: string;
+  error: string | null;
+  created_at: number;
+  updated_at: number;
+}

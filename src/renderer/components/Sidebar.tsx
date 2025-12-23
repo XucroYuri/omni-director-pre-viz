@@ -8,6 +8,7 @@ import {
   FileSearch, Download, Upload, FileJson, Info, FileText, Terminal, CheckCircle2, AlertCircle, Link2, Camera, Eraser, Wand2, Package
 } from 'lucide-react';
 import { enhanceAssetDescription, generateAssetImage } from '../services/geminiService';
+import TaskPanel from './TaskPanel';
 
 interface SidebarProps {
   config: GlobalConfig;
@@ -613,6 +614,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </button>
                 </div>
               </section>
+
+              <TaskPanel />
             </div>
           </>
         )}

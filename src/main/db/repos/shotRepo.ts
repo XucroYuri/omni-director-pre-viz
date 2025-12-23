@@ -64,6 +64,11 @@ export class ShotRepo {
     stmt.run(shot);
   }
 
+  get(id: string): DBShot | undefined {
+    const stmt = this.db.prepare('SELECT * FROM shots WHERE id = ?');
+    return stmt.get(id) as DBShot | undefined;
+  }
+
   getByEpisodeId(episodeId: string): DBShot[] {
     const stmt = this.db.prepare('SELECT * FROM shots WHERE episode_id = ? ORDER BY order_index ASC');
     return stmt.all(episodeId) as DBShot[];
