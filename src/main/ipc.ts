@@ -12,6 +12,7 @@ import {
   recommendAssets,
 } from './providers/aihubmix/gemini';
 import { generateShotVideo } from './providers/aihubmix/sora2';
+import { exportEpisode } from './services/exportService';
 
 let registered = false;
 
@@ -22,6 +23,8 @@ export function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.ping, async () => {
     return 'pong';
   });
+
+  ipcMain.handle(IPC_CHANNELS.app.exportEpisode, async (_evt, options) => exportEpisode(options));
 
   ipcMain.handle(IPC_CHANNELS.ai.breakdownScript, async (_evt, script, config) => limiters.llm(() => breakdownScript(script, config)));
   ipcMain.handle(IPC_CHANNELS.ai.recommendAssets, async (_evt, shot, config) => limiters.llm(() => recommendAssets(shot, config)));

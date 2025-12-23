@@ -3,6 +3,9 @@ import { IPC_CHANNELS, type PreloadApi } from '../shared/ipc';
 
 const api: PreloadApi = {
   ping: () => ipcRenderer.invoke(IPC_CHANNELS.ping),
+  app: {
+    exportEpisode: (options) => ipcRenderer.invoke(IPC_CHANNELS.app.exportEpisode, options),
+  },
   ai: {
     breakdownScript: (script, config) => ipcRenderer.invoke(IPC_CHANNELS.ai.breakdownScript, script, config),
     recommendAssets: (shot, config) => ipcRenderer.invoke(IPC_CHANNELS.ai.recommendAssets, shot, config),

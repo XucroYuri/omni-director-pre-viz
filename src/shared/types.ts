@@ -71,6 +71,46 @@ export interface VideoGenerationParams {
   angleIndex?: number;
 }
 
+export interface ExportOptions {
+  episodeId: string;
+  shots: Shot[];
+  config: GlobalConfig;
+  includeVideos: boolean;
+  createZip: boolean;
+  outputDir?: string;
+}
+
+export interface ManifestShot {
+  shotId: string;
+  visualTranslation: string;
+  matrixImage: string;
+  slices: string[];
+  videos: (string | null)[];
+  animaticVideo: string | null;
+  assetVideo: string | null;
+  prompts: string[];
+  assets: {
+    characters: string[];
+    scenes: string[];
+    props: string[];
+  };
+}
+
+export interface Manifest {
+  version: string;
+  episodeId: string;
+  generatedAt: string;
+  totalShots: number;
+  shots: ManifestShot[];
+}
+
+export interface ExportResult {
+  success: boolean;
+  outputPath: string;
+  zipPath?: string;
+  error?: string;
+}
+
 export type ApiProvider = 'aihubmix';
 
 export interface GlobalConfig {
