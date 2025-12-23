@@ -77,7 +77,10 @@ Angle_08: ${prompts[7] || ''}
 Angle_09: ${prompts[8] || ''}`.trim();
 }
 
-export async function generateShotVideo(params: VideoGenerationParams, config: GlobalConfig): Promise<string> {
+export async function generateShotVideo(
+  params: VideoGenerationParams,
+  config: GlobalConfig,
+): Promise<{ path: string; dataUri: string }> {
   const env = getAihubmixEnv();
   const size = mapVideoSize(config.aspectRatio);
 
@@ -162,5 +165,5 @@ export async function generateShotVideo(params: VideoGenerationParams, config: G
   const filePath = path.join(env.outputDir, 'videos', `sora2_${hash}.mp4`);
   await fs.writeFile(filePath, bytes);
 
-  return `data:video/mp4;base64,${Buffer.from(bytes).toString('base64')}`;
+  return { path: filePath, dataUri: `data:video/mp4;base64,${Buffer.from(bytes).toString('base64')}` };
 }

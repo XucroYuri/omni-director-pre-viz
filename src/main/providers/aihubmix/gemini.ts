@@ -214,7 +214,10 @@ const IMAGE_PRESET_PREFIX = `[生成约束/不可省略]
 - 输出为一张 3x3 网格母图（9 格），每格为不同机位 Angle_01..Angle_09
 `;
 
-export async function generateGridImage(shot: Shot, config: GlobalConfig): Promise<string> {
+export async function generateGridImage(
+  shot: Shot,
+  config: GlobalConfig,
+): Promise<{ path: string; dataUri: string }> {
   const ai = getClient();
   const prompts = shot.matrixPrompts || [];
   if (prompts.length !== 9) throw new Error('matrixPrompts must have 9 prompts (Angle_01..Angle_09)');
@@ -283,9 +286,10 @@ Angle_09: ${prompts[8]}
   const { outputDir } = getAihubmixEnv();
   await fs.mkdir(path.join(outputDir, 'images'), { recursive: true });
   const hash = crypto.createHash('sha1').update(base64Png).digest('hex').slice(0, 12);
-  await fs.writeFile(path.join(outputDir, 'images', `grid_${shot.id}_${hash}.png`), Buffer.from(base64Png, 'base64'));
+  const filePath = path.join(outputDir, 'images', `grid_${shot.id}_${hash}.png`);
+  await fs.writeFile(filePath, Buffer.from(base64Png, 'base64'));
 
-  return `data:image/png;base64,${base64Png}`;
+  return { path: filePath, dataUri: `data:image/png;base64,${base64Png}` };
 }
 
 export async function enhanceAssetDescription(name: string, currentDesc: string): Promise<string> {
@@ -298,7 +302,11 @@ export async function enhanceAssetDescription(name: string, currentDesc: string)
   return response.text || currentDesc;
 }
 
-export async function generateAssetImage(name: string, description: string, config: GlobalConfig): Promise<string> {
+export async function generateAssetImage(
+  name: string,
+  description: string,
+  config: GlobalConfig,
+): Promise<{ path: string; dataUri: string }> {
   const ai = getClient();
   const prompt = `${IMAGE_PRESET_PREFIX}\n[概念设计图]\n全局风格: ${config.artStyle}\n主体: ${name}\n细节: ${description}`;
 
@@ -314,7 +322,21 @@ export async function generateAssetImage(name: string, description: string, conf
   const candidate = response.candidates?.[0];
   const inline = candidate?.content?.parts?.find((p: any) => p.inlineData)?.inlineData;
   if (!inline?.data) throw new Error('Asset image generation returned no inline image data');
-  return `data:image/png;base64,${inline.data}`;
+
+  const { outputDir } = getAihubmixEnv();
+  await fs.mkdir(path.join(outputDir, 'assets'), { recursive: true });
+  const safeName = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 32);
+  const hash = crypto.createHash('sha1').update(inline.data).digest('hex').slice(0, 12);
+  const fileName = `asset_${safeName || 'item'}_${hash}.png`;
+  const filePath = path.join(outputDir, 'assets', fileName);
+  await fs.writeFile(filePath, Buffer.from(inline.data, 'base64'));
+
+  return { path: filePath, dataUri: `data:image/png;base64,${inline.data}` };
 }
 
 export async function discoverMissingAssets(shot: Shot, config: GlobalConfig): Promise<DiscoverMissingAssetsResult> {

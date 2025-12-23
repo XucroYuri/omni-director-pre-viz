@@ -1,6 +1,6 @@
 
 import React, { useRef, useState, useEffect } from 'react';
-import { Shot, GlobalConfig, Character, Scene, Prop, ShotHistoryItem } from '@shared/types';
+import { DBTask, Shot, GlobalConfig, Character, Scene, Prop, ShotHistoryItem } from '@shared/types';
 import { 
   Zap, RefreshCw, Wand2, Maximize2, User, Info, Check, X, Plus,
   Monitor, Layout, Layers, Box, Camera, Target, Map, Clock, History, Upload,
@@ -13,14 +13,14 @@ import {
 import { 
   enhanceAssetDescription, 
   discoverMissingAssets,
-  generateMatrixPrompts,
-  generateShotVideo
+  generateMatrixPrompts
 } from '../services/geminiService';
 
 interface MatrixPromptEditorProps {
   shot: Shot;
   allShots: Shot[];
   config: GlobalConfig;
+  episodeId: string;
   onUpdatePrompts: (prompts: string[]) => void;
   onUpdateShot: (updates: Partial<Shot>) => void;
   onGenerateImage: () => void;
@@ -38,7 +38,7 @@ interface MatrixPromptEditorProps {
 }
 
 const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({ 
-  shot, allShots, config, onUpdatePrompts, onUpdateShot, onGenerateImage, onRestoreHistory, 
+  shot, allShots, config, episodeId, onUpdatePrompts, onUpdateShot, onGenerateImage, onRestoreHistory, 
   onAddGlobalAsset, onDeleteGlobalAsset, onUpdateGlobalAsset, onOptimizePrompts, 
   onAutoLinkAssets, isGeneratingImage, isOptimizing, isAutoLinking,
   isRebuildingCache
@@ -132,6 +132,40 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     videoTimersRef.current[index] = { processing, downloading };
   };
 
+  const submitVideoTask = async (payload: {
+    inputMode: 'IMAGE_FIRST_FRAME' | 'MATRIX_FRAME' | 'ASSET_COLLAGE' | 'TEXT_ONLY';
+    angleIndex?: number;
+    prompt?: string;
+  }) => {
+    if (!window.api?.app?.task?.submit) {
+      throw new Error('Task queue is not available in this runtime.');
+    }
+    const now = Date.now();
+    const taskId =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `task_${now}_${Math.random().toString(16).slice(2, 10)}`;
+    const task: DBTask = {
+      id: taskId,
+      episode_id: episodeId,
+      shot_id: shotRef.current.id,
+      type: 'VIDEO',
+      status: 'queued',
+      progress: 0,
+      payload_json: JSON.stringify({
+        jobKind: 'VIDEO_GEN',
+        episodeId,
+        shotId: shotRef.current.id,
+        ...payload,
+      }),
+      result_json: '',
+      error: null,
+      created_at: now,
+      updated_at: now,
+    };
+    await window.api.app.task.submit(task);
+  };
+
   const handleCreateShotVideo = async (index: number, promptOverride?: string) => {
     if (!shot.splitImages || !shot.splitImages[index]) return;
     const status = shot.videoStatus?.[index];
@@ -142,22 +176,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
 
     try {
       const prompt = (promptOverride || prompts[index] || shot.visualTranslation).trim();
-      const videoUrl = await generateShotVideo(
-        {
-          inputMode: 'IMAGE_FIRST_FRAME',
-          shot,
-          angleIndex: index,
-          imageUri: shot.splitImages[index],
-          prompt,
-        },
-        config,
-      );
-      const nextUrls = [...(shot.videoUrls || Array(9).fill(null))];
-      nextUrls[index] = videoUrl;
-      clearVideoTimers(index);
-      const finalStatus = [...(shotRef.current.videoStatus || Array(9).fill('idle'))];
-      finalStatus[index] = 'completed';
-      onUpdateShot({ videoUrls: nextUrls, videoStatus: finalStatus });
+      await submitVideoTask({ inputMode: 'IMAGE_FIRST_FRAME', angleIndex: index, prompt });
     } catch (err) {
       console.error(err);
       clearVideoTimers(index);
@@ -171,16 +190,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     if (!shot.generatedImageUrl || isGeneratingAnimatic) return;
     setIsGeneratingAnimatic(true);
     try {
-      const videoUrl = await generateShotVideo(
-        {
-          inputMode: 'MATRIX_FRAME',
-          shot,
-          imageUri: shot.generatedImageUrl,
-        },
-        config,
-      );
-      onUpdateShot({ animaticVideoUrl: videoUrl });
-      setShowAnimaticPreview(true);
+      await submitVideoTask({ inputMode: 'MATRIX_FRAME' });
     } catch (err) {
       console.error(err);
     } finally {
@@ -192,15 +202,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     if (isGeneratingAssetVideo || !hasAssetRefs) return;
     setIsGeneratingAssetVideo(true);
     try {
-      const videoUrl = await generateShotVideo(
-        {
-          inputMode: 'ASSET_COLLAGE',
-          shot,
-        },
-        config,
-      );
-      onUpdateShot({ assetVideoUrl: videoUrl });
-      setShowAssetVideoPreview(true);
+      await submitVideoTask({ inputMode: 'ASSET_COLLAGE' });
     } catch (err) {
       console.error(err);
     } finally {

@@ -7,6 +7,7 @@ import type {
   ScriptBreakdownResponse,
   Shot,
   VideoGenerationParams,
+  DBTask,
 } from './types';
 
 export const IPC_CHANNELS = {
@@ -16,6 +17,11 @@ export const IPC_CHANNELS = {
     db: {
       saveEpisode: 'app:db:saveEpisode',
       loadEpisode: 'app:db:loadEpisode',
+    },
+    task: {
+      submit: 'app:task:submit',
+      list: 'app:task:list',
+      update: 'app:task:update',
     },
   },
   ai: {
@@ -46,6 +52,12 @@ export type PreloadApi = {
     db: {
       saveEpisode: (data: EpisodeData) => Promise<void>;
       loadEpisode: (episodeId: string) => Promise<EpisodeData | null>;
+    };
+    task: {
+      submit: (task: DBTask) => Promise<void>;
+      list: () => Promise<DBTask[]>;
+      onUpdate: (callback: (task: DBTask) => void) => void;
+      offUpdate: (callback: (task: DBTask) => void) => void;
     };
   };
   ai: {

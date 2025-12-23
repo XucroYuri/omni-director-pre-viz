@@ -14,6 +14,7 @@ import {
 import { generateShotVideo } from './providers/aihubmix/sora2';
 import { dbService } from './services/dbService';
 import { exportEpisode } from './services/exportService';
+import { taskQueue } from './queue/TaskQueue';
 
 let registered = false;
 
@@ -28,6 +29,8 @@ export function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.app.exportEpisode, async (_evt, options) => exportEpisode(options));
   ipcMain.handle(IPC_CHANNELS.app.db.saveEpisode, async (_evt, data) => dbService.saveEpisodeFull(data));
   ipcMain.handle(IPC_CHANNELS.app.db.loadEpisode, async (_evt, episodeId) => dbService.loadEpisode(episodeId));
+  ipcMain.handle(IPC_CHANNELS.app.task.submit, async (_evt, task) => taskQueue.enqueue(task));
+  ipcMain.handle(IPC_CHANNELS.app.task.list, async () => taskQueue.list());
 
   ipcMain.handle(IPC_CHANNELS.ai.breakdownScript, async (_evt, script, config) => limiters.llm(() => breakdownScript(script, config)));
   ipcMain.handle(IPC_CHANNELS.ai.recommendAssets, async (_evt, shot, config) => limiters.llm(() => recommendAssets(shot, config)));
@@ -35,15 +38,26 @@ export function registerIpcHandlers() {
     limiters.llm(() => generateMatrixPrompts(shot, config)),
   );
   ipcMain.handle(IPC_CHANNELS.ai.optimizePrompts, async (_evt, shot, config) => limiters.llm(() => optimizePrompts(shot, config)));
-  ipcMain.handle(IPC_CHANNELS.ai.generateGridImage, async (_evt, shot, config) => limiters.image(() => generateGridImage(shot, config)));
+  ipcMain.handle(IPC_CHANNELS.ai.generateGridImage, async (_evt, shot, config) =>
+    limiters.image(async () => {
+      const { dataUri } = await generateGridImage(shot, config);
+      return dataUri;
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.ai.generateShotVideo, async (_evt, params, config) =>
-    limiters.video(() => generateShotVideo(params, config)),
+    limiters.video(async () => {
+      const { dataUri } = await generateShotVideo(params, config);
+      return dataUri;
+    }),
   );
   ipcMain.handle(IPC_CHANNELS.ai.enhanceAssetDescription, async (_evt, name, currentDesc) =>
     limiters.llm(() => enhanceAssetDescription(name, currentDesc)),
   );
   ipcMain.handle(IPC_CHANNELS.ai.generateAssetImage, async (_evt, name, description, config) =>
-    limiters.image(() => generateAssetImage(name, description, config)),
+    limiters.image(async () => {
+      const { dataUri } = await generateAssetImage(name, description, config);
+      return dataUri;
+    }),
   );
   ipcMain.handle(IPC_CHANNELS.ai.discoverMissingAssets, async (_evt, shot, config) =>
     limiters.llm(() => discoverMissingAssets(shot, config)),

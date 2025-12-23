@@ -1,16 +1,15 @@
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import MatrixPromptEditor from './components/MatrixPromptEditor';
-import { GlobalConfig, Shot, ScriptBreakdownResponse, Character, ShotHistoryItem } from '@shared/types';
+import { DBTask, GlobalConfig, Shot, ScriptBreakdownResponse } from '@shared/types';
 import { DEFAULT_STYLE } from '@shared/constants';
 import { 
   FileText, Terminal, Settings, X, RefreshCw, Zap, Clock, 
   CheckCircle2, AlertCircle, Loader2, Cpu, Monitor, FastForward,
   Database, Layout, Sparkles
 } from 'lucide-react';
-import { breakdownScript, generateGridImage, optimizePrompts, generateMatrixPrompts, recommendAssets } from './services/geminiService';
-import { splitGridImage } from './utils/imageUtils';
+import { breakdownScript } from './services/geminiService';
 
 const STORAGE_KEYS = {
   CONFIG: 'OMNI_DIRECTOR_CONFIG',
@@ -53,6 +52,7 @@ const App: React.FC = () => {
   const [isAutoLinking, setIsAutoLinking] = useState(false);
   const [apiStatus, setApiStatus] = useState<'connected' | 'error' | 'idle'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const isReloadingRef = useRef(false);
 
   const normalizePolicyError = (message: string) => {
     if (!message) return message;
@@ -79,39 +79,73 @@ const App: React.FC = () => {
   const handleGenerateImage = async (shotId: string) => {
     const shot = breakdown?.shots.find(s => s.id === shotId);
     if (!shot || isGeneratingImage) return;
+    if (!window.api?.app?.task?.submit) {
+      alert('任务队列仅在 Electron 环境可用。');
+      return;
+    }
 
     setIsGeneratingImage(true);
     setErrorMessage(null);
+
     try {
-      // 1. 生成单张母图
-      const imageUrl = await generateGridImage(shot, config);
-      
-      // 2. 物理切片处理
-      const splitImages = await splitGridImage(imageUrl);
-      
-      const historyItem: ShotHistoryItem = {
-        timestamp: Date.now(),
-        imageUrl,
-        splitImages,
-        prompts: [...(shot.matrixPrompts || [])],
-        videoUrls: Array(9).fill(null)
+      const now = Date.now();
+      const taskId =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `task_${now}_${Math.random().toString(16).slice(2, 10)}`;
+
+      const sanitizeAssets = <T extends { refImage?: string }>(items: T[]) =>
+        items.map(({ refImage, ...rest }) => rest);
+
+      const taskShot = {
+        id: shot.id,
+        originalText: shot.originalText,
+        visualTranslation: shot.visualTranslation,
+        contextTag: shot.contextTag,
+        shotKind: shot.shotKind,
+        matrixPrompts: shot.matrixPrompts,
+        characterIds: shot.characterIds,
+        sceneIds: shot.sceneIds,
+        propIds: shot.propIds,
       };
 
-      updateShot(shotId, {
-        generatedImageUrl: imageUrl,
-        splitImages,
-        videoUrls: Array(9).fill(null),
-        videoStatus: Array(9).fill('idle'),
-        status: 'completed',
-        history: [historyItem, ...(shot.history || [])],
-        lastAccessedAt: Date.now()
-      });
+      const taskConfig = {
+        ...config,
+        characters: sanitizeAssets(config.characters),
+        scenes: sanitizeAssets(config.scenes),
+        props: sanitizeAssets(config.props),
+      };
+
+      const payload = {
+        jobKind: 'MATRIX_GEN',
+        shot: taskShot,
+        config: taskConfig,
+      };
+
+      const task: DBTask = {
+        id: taskId,
+        episode_id: episodeId,
+        shot_id: shot.id,
+        type: 'IMAGE',
+        status: 'queued',
+        progress: 0,
+        payload_json: JSON.stringify(payload),
+        result_json: '',
+        error: null,
+        created_at: now,
+        updated_at: now,
+      };
+
+      await window.api.app.task.submit(task);
+      updateShot(shotId, { status: 'processing', lastAccessedAt: now });
       setApiStatus('connected');
     } catch (error: any) {
       const message = typeof error?.message === 'string' ? error.message : 'Unknown error';
       setErrorMessage(normalizePolicyError(message));
       setApiStatus('error');
-    } finally { setIsGeneratingImage(false); }
+    } finally {
+      setIsGeneratingImage(false);
+    }
   };
 
   const handleBreakdown = async () => {
@@ -153,29 +187,56 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLoadEpisode = async () => {
-    if (!window.api?.app?.db) {
-      alert('DB 功能仅在 Electron 环境可用。');
-      return;
-    }
-    try {
-      const data = await window.api.app.db.loadEpisode(episodeId);
-      if (!data) {
-        alert('未找到对应 Episode。');
+  const reloadEpisode = useCallback(
+    async (options?: { notify?: boolean }) => {
+      if (!window.api?.app?.db) {
+        if (options?.notify) alert('DB 功能仅在 Electron 环境可用。');
         return;
       }
-      setConfig(data.config);
-      setBreakdown({
-        context: '',
-        shots: data.shots,
-        characters: data.assets.characters.map((c) => ({ name: c.name, description: c.description })),
-      });
-      setSelectedShotId(data.shots[0]?.id || null);
-      setApiStatus('connected');
-    } catch (error: any) {
-      alert(`读取失败: ${error?.message || error}`);
-    }
+      try {
+        const data = await window.api.app.db.loadEpisode(episodeId);
+        if (!data) {
+          if (options?.notify) alert('未找到对应 Episode。');
+          return;
+        }
+        setConfig(data.config);
+        setBreakdown({
+          context: '',
+          shots: data.shots,
+          characters: data.assets.characters.map((c) => ({ name: c.name, description: c.description })),
+        });
+        setSelectedShotId(data.shots[0]?.id || null);
+        setApiStatus('connected');
+      } catch (error: any) {
+        if (options?.notify) alert(`读取失败: ${error?.message || error}`);
+      }
+    },
+    [episodeId],
+  );
+
+  const handleLoadEpisode = async () => {
+    await reloadEpisode({ notify: true });
   };
+
+  useEffect(() => {
+    const taskApi = window.api?.app?.task;
+    if (!taskApi?.onUpdate || !taskApi?.offUpdate) return () => {};
+
+    const handleUpdate = (task: DBTask) => {
+      if (task.status !== 'completed') return;
+      if (task.episode_id !== episodeId) return;
+      if (isReloadingRef.current) return;
+      isReloadingRef.current = true;
+      reloadEpisode()
+        .catch((err) => console.error('Episode reload failed', err))
+        .finally(() => {
+          isReloadingRef.current = false;
+        });
+    };
+
+    taskApi.onUpdate(handleUpdate);
+    return () => taskApi.offUpdate(handleUpdate);
+  }, [episodeId, reloadEpisode]);
 
   return (
     <div className="flex h-screen w-full bg-[#0f1115] text-slate-300 overflow-hidden font-sans">
@@ -207,6 +268,7 @@ const App: React.FC = () => {
             <MatrixPromptEditor 
               shot={breakdown!.shots.find(s => s.id === selectedShotId)!}
               allShots={breakdown!.shots} config={config}
+              episodeId={episodeId}
               onUpdatePrompts={(p) => updateShot(selectedShotId, { matrixPrompts: p })}
               onUpdateShot={(u) => updateShot(selectedShotId, u)}
               onGenerateImage={() => handleGenerateImage(selectedShotId)}

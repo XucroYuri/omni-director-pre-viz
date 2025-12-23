@@ -28,6 +28,27 @@ export class AssetRepo {
     stmt.run(asset);
   }
 
+  upsert(asset: DBAsset): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO assets (id, episode_id, type, name, description, ref_image_path, tags_json, created_at, updated_at)
+      VALUES (@id, @episode_id, @type, @name, @description, @ref_image_path, @tags_json, @created_at, @updated_at)
+      ON CONFLICT(id) DO UPDATE SET
+        episode_id = @episode_id,
+        type = @type,
+        name = @name,
+        description = @description,
+        ref_image_path = @ref_image_path,
+        tags_json = @tags_json,
+        updated_at = @updated_at
+    `);
+    stmt.run(asset);
+  }
+
+  get(id: string): DBAsset | undefined {
+    const stmt = this.db.prepare('SELECT * FROM assets WHERE id = ?');
+    return stmt.get(id) as DBAsset | undefined;
+  }
+
   getByEpisodeId(episodeId: string): DBAsset[] {
     const stmt = this.db.prepare('SELECT * FROM assets WHERE episode_id = ?');
     return stmt.all(episodeId) as DBAsset[];
