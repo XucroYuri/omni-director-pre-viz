@@ -432,13 +432,18 @@ export default function QueueOpsPage() {
     setActionError(null);
     setBulkPending(true);
     try {
+      const resolvedTaskIds =
+        taskIds && taskIds.length > 0 ? taskIds : selectedPreviewTaskIds.length > 0 ? selectedPreviewTaskIds : undefined;
+      if (!resolvedTaskIds || resolvedTaskIds.length === 0) {
+        throw new Error('Select tasks to retry (run preview first)');
+      }
       const result = await retryDeadLettersInBulk({
         episodeId: filters.episodeId || undefined,
         jobKind: filters.jobKind || undefined,
         traceId: filters.traceId || undefined,
         deadReason: bulkDeadReason.trim() || undefined,
         errorCode: bulkErrorCode.trim() || undefined,
-        taskIds: taskIds && taskIds.length > 0 ? taskIds : undefined,
+        taskIds: resolvedTaskIds,
         limit: parseOptionalPositiveInt(bulkLimit),
         actor: 'ops-console',
         reason: bulkReason.trim() || undefined,
