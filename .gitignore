@@ -18,6 +18,9 @@ tmp
 temp_verification_out
 .npm-cache
 
+# Local agent state
+.sisyphus/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
