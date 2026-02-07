@@ -1,4 +1,10 @@
+---
+status: ARCHIVED
+---
+
 # 全面技术评审与解决方案文档 (Technical Review)
+
+> 历史文档说明：本文件仅用于历史评估追溯，当前实施入口为 `rules.md` 与 `docs/*`。
 
 **日期**: 2025-12-20  
 **项目**: Omni Director Pre-viz  

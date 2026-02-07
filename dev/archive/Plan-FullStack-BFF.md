@@ -1,4 +1,10 @@
+---
+status: ARCHIVED
+---
+
 # Plan-FullStack-BFF: 高性能安全前后端分离架构方案
+
+> 历史文档说明：本文件仅用于历史方案追溯，当前实施入口为 `rules.md` 与 `docs/*`。
 
 **版本**: V1.0 (BFF Architecture)
 **日期**: 2025-12-20

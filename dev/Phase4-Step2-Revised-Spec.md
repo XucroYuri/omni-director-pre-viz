@@ -1,4 +1,10 @@
+---
+status: ARCHIVED
+---
+
 # Phase 4 Step 2 (Revised): 多模态一致性架构升级方案
+
+> 历史文档说明：本文件为已归档阶段方案，当前实施入口为 `rules.md` 与 `docs/*`。
 
 **状态**: 待确认 (Draft)
 **作者**: G 队 (Aux)

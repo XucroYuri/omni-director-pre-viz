@@ -1,3 +1,7 @@
+---
+status: REFERENCE
+---
+
 # Task Brief（PM → Agent 任务简报模板）
 
 > 目的：把“需求”写到可执行、可验收，避免 Agent 自行补全导致方向偏差。
@@ -15,7 +19,8 @@
 ## 4) 约束 / 红线（必须遵守）
 - 规则文件（逐条引用路径）：
   - `rules.md`
-  - `dev/Guardrails.md`
+  - `docs/roadmap/Phase9-Execution-Detail.md`
+  - `docs/governance/Risk-Audit-Checklist-2026.md`
 - 本次允许/禁止改动的目录：
 - 触碰锁定区域是否允许：是/否（若是，必须维护者 Review）
 
@@ -36,4 +41,3 @@
 ## 8) 风险与回滚
 - 可能风险：
 - 回滚方式：
-

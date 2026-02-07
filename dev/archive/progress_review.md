@@ -1,4 +1,10 @@
+---
+status: ARCHIVED
+---
+
 # 项目进度审查与重构建议 (Progress Review & Refactoring Plan)
+
+> 历史文档说明：本文件仅用于历史评估追溯，当前实施入口为 `rules.md` 与 `docs/*`。
 
 **日期**: 2025-12-20
 **状态**: 初始评估完成

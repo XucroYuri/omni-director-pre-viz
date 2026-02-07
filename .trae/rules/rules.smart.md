@@ -1,15 +1,15 @@
 ---
 alwaysApply: false
-description: "涉及 Provider/Key/IPC/并发/输出/Prompt/参考图语义时"
+description: "涉及 Provider/Key/任务队列/worker/错误码/审计链路时"
 ---
 
 # 关键链路规则（智能生效）
 
-- 互认：与 `rules.md` 同时生效；不一致先停手对齐并提“待拍板”。
-- 先对齐：看 `dev/Consensus-Lock.md`/`dev/Plan-Codex.md`/`rules.md`；无结论先提问再写。
-- IPC先行：协议/类型放 `shared/`；禁 `any`；错误码可追踪（含provider/模型/请求id）。
-- Key 不可降级：不随包；缺失/失效必弹窗；加密落盘；设备变更即销毁并重录入。
-- Provider：接口预留多服务商/主备，但实现仍 aihubmix-only；并发 LLM10/IMG5/VID3；429 降级+冷却恢复。
-- 模型ID：集中定义 + `MODEL ID LOCKED - ONLY MAINTAINER CAN CHANGE`；非维护者改动=阻断。
-- Prompt：发送前强制“预设前缀+动态内容”；引用资产图写清性质与文件名。
-- 输出：命名/目录稳定；ZIP 默认不含视频（勾选才含）。
+- 先对齐：优先阅读 `rules.md` 与 `docs/roadmap/Phase9-Execution-Detail.md`，再实施。
+- 禁止降级：不得把 Provider 直连、密钥管理、重试逻辑塞回 UI。
+- 模型锁定：模型 ID 必须集中定义并带 `MODEL ID LOCKED - ONLY MAINTAINER CAN CHANGE` 注释。
+- worker 可靠性：必须保留 lease token、心跳续租、过期回收、幂等提交、退避重试。
+- 错误分层：统一 `code/message/context`；不可重试错误直接 dead-letter。
+- UI 排障：错误码到可读文案映射不得缺失或绕过。
+- 批量重试：默认支持 dry-run 预演；执行动作必须写审计日志。
+- 变更证明：涉及任务链路时，提交中必须附回归验证步骤与结果。

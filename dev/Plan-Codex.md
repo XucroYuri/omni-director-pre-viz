@@ -1,6 +1,12 @@
+---
+status: SUPERSEDED
+---
+
 # Plan-Codex（vNext 比稿版）：面向最初需求的落地开发方案与任务分解
 
-> 权威实施标准：本文档（`dev/Plan-Codex.md`）+ `rules.md` + `dev/Guardrails.md`。`dev/Plan-Electron-Standalone.md` 仅为 Electron 工程落地参考，不得覆盖本文口径；共识锁定见 `dev/Consensus-Lock.md`。
+> 历史文档说明：本文件保留为历史方案快照，不再作为当前实施入口。当前请以 `rules.md` 与 `docs/*` 为准。
+
+> 当时权威实施标准（历史口径）：本文档（`dev/Plan-Codex.md`）+ `rules.md` + `dev/Guardrails.md`。`dev/Plan-Electron-Standalone.md` 仅为 Electron 工程落地参考，不得覆盖本文口径；共识锁定见 `dev/Consensus-Lock.md`。
 
 **作者**：Codex（方案提案/比稿版本）  
 **范围**：仅规划与文档，不改动现有代码（代码实施为下一阶段）。  

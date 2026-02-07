@@ -1,4 +1,10 @@
+---
+status: REFERENCE
+---
+
 # 项目全量代码审查与迁移评估报告 (Code Review & Migration Assessment)
+
+> 历史文档说明：本文件为阶段性迁移评估快照，当前实施入口为 `rules.md` 与 `docs/*`。
 
 **日期**: 2025-12-20
 **基准计划**: `dev/Plan-Codex.md` (vNext：Electron + SQLite + Local-first + 前后端分离)
