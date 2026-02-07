@@ -1,5 +1,22 @@
 const baseUrl = process.env.WEB_BASE_URL || 'http://127.0.0.1:3100';
 
+const AUTH_HEADERS = {
+  'x-dev-user': process.env.OMNI_DEV_USER || 'e2e',
+  'x-dev-role': process.env.OMNI_DEV_ROLE || 'owner',
+};
+
+const baseFetch = globalThis.fetch;
+globalThis.fetch = (input, init = {}) => {
+  const headers = {
+    ...(init.headers || {}),
+    ...AUTH_HEADERS,
+  };
+  return baseFetch(input, {
+    ...init,
+    headers,
+  });
+};
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
