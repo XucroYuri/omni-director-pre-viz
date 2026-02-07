@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - 'codex/**'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build and E2E
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: omni
+          POSTGRES_PASSWORD: omni_dev_password
+          POSTGRES_DB: omni_web
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U omni -d omni_web"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    env:
+      CI: '1'
+      DATABASE_URL: postgres://omni:omni_dev_password@127.0.0.1:5432/omni_web
+      WEB_BASE_URL: http://127.0.0.1:3100
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/web/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install web dependencies
+        run: npm --prefix apps/web ci
+
+      - name: Docs governance audit
+        run: node scripts/docs-governance-audit.cjs
+
+      - name: Build Electron TypeScript
+        run: npm run build:electron
+
+      - name: Build web app
+        run: npm run phase9:web:build
+
+      - name: Electron task error E2E
+        run: npm run test:e2e:task-errors
+
+      - name: Web dead-letter retry E2E
+        run: npm run test:e2e:web-dead-letter-retry
