@@ -1,5 +1,24 @@
 const path = require('path');
 const fs = require('fs');
+const { spawnSync } = require('child_process');
+
+const inElectron = Boolean(process.versions && process.versions.electron);
+if (!inElectron && !process.argv.includes('--electron-verify')) {
+  try {
+    const electronPath = require('electron');
+    const result = spawnSync(electronPath, [__filename, '--electron-verify'], {
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: '',
+        ELECTRON_FORCE_IS_PACKAGED: '',
+      },
+    });
+    process.exit(result.status ?? 1);
+  } catch {
+    // Fall through to Node-mode stub for environments without Electron binary.
+  }
+}
 
 let app;
 try {

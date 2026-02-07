@@ -1,4 +1,10 @@
+---
+status: ARCHIVED
+---
+
 # Phase 5 Step 1: SQLite Schema Specification
+
+> 历史文档说明：本文件为已归档阶段方案，当前实施入口为 `rules.md` 与 `docs/*`。
 
 ## 1. Overview
 

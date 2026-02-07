@@ -1,3 +1,7 @@
+---
+status: REFERENCE
+---
+
 # Vibe Coding 标准化规则（PM 约束 Agent 的可执行版本）
 
 > 目标：把“会写代码”升级为“可控、可验收、可复盘”的 Agent 协作工程流程。  
@@ -9,7 +13,7 @@
 - 任何由 Agent 参与的研发活动：写代码 / 改代码 / 评审 / 迁移 / 写文档 / 写脚本。
 
 ### 0.2 规则优先级（冲突时以高者为准）
-1) 项目内**硬红线/硬门禁**（例如 `rules.md`、`dev/Guardrails.md`、CI 门禁、CODEOWNERS）
+1) 项目内**硬红线/硬门禁**（例如 `rules.md`、`docs/governance/Risk-Audit-Checklist-2026.md`、CI 门禁、CODEOWNERS）
 2) 本文档（Vibe Coding 标准化规则）
 3) 口头约定 / 聊天记录 / “照着感觉来”的临时想法
 
@@ -86,11 +90,10 @@ Agent 的最终交付必须包含：
 
 ## 6. 在本项目中的落地方式（推荐）
 
-- 需求与约束：以 `rules.md`（红线）+ `dev/Guardrails.md`（门禁）为最高优先级输入给 Agent。
+- 需求与约束：以 `rules.md`（红线）+ `docs/governance/Risk-Audit-Checklist-2026.md`（风险门禁）为最高优先级输入给 Agent。
 - 任务写法：用 `templates/Task-Brief.md`，并明确本次是否允许触碰锁定区域。
 - 交付写法：用 `templates/Change-Report.md`，并在 `dev/log.md` 或 `dev/log_YYYYMMDD_*.md` 留痕可复盘。
 
 ---
 
 **最后更新**：2025-12-20
-

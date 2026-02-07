@@ -5,12 +5,13 @@ globs:
   - "src/renderer/**"
   - "ui/**"
   - "src/ui/**"
+  - "apps/web/src/**/*.tsx"
 ---
 
-# Renderer 边界规则（按文件匹配生效）
+# 前端边界规则（按文件匹配生效）
 
-- 互查：本规则是 `rules.md` 的 Renderer 落地版；冲突先停手并对齐 `dev/Consensus-Lock.md`。
-- 禁止导入/使用：`electron`、`electron/*`、`fs`、`path`、`child_process`、`worker_threads`、`net`、`tls`、`dgram`、`better-sqlite3`、`@google/genai`、`openai` 等。
-- 禁止直连外部网络：Renderer 仅可调用 Main 提供的 IPC（或允许时 `127.0.0.1` 本地 HTTP + 会话 token），不得直接请求 `https://aihubmix.com/*`。
-- 禁止写入磁盘：文件读写、SQLite、导出/打包、解压缩等必须在 Main 执行并经 IPC 暴露最小能力面。
-- UI 只处理展示与交互：不要在 Renderer 实现密钥管理、并发队列、provider 重试/降级、或任何安全敏感逻辑。
+- 与 `rules.md` 同时生效；冲突以 `rules.md` 为准。
+- 禁止在前端代码中持有或拼接 Provider Key。
+- 禁止前端直连 `https://aihubmix.com/*`；请求应走服务端 API。
+- 禁止在前端实现 provider 重试/降级、任务调度、审计写入等后端职责。
+- UI 只处理展示与交互，任务编排与执行由 API/worker 负责。

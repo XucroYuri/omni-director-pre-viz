@@ -8,12 +8,15 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+**/.next
 dist
+dist-app
 dist-ssr
 *.local
 output
 tmp
 temp_verification_out
+.npm-cache
 
 # Editor directories and files
 .vscode/*
