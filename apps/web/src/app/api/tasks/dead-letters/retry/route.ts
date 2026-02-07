@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { readJsonBody, runApi } from '@/lib/api';
+import { requireRole } from '@/lib/auth';
 import { jsonError } from '@/lib/errors';
 import { bulkRetryDeadLetters, hasRecentTaskAuditAction } from '@/lib/repos/tasks';
 import { ensurePhase91Schema } from '@/lib/schema';
@@ -31,6 +32,8 @@ const bulkRetryInputSchema = z.object({
 export async function POST(request: NextRequest) {
   return runApi(async () => {
     await ensurePhase91Schema();
+    const authError = requireRole(request, 'owner');
+    if (authError) return authError;
     const parsed = bulkRetryInputSchema.safeParse(await readJsonBody(request));
     if (!parsed.success) {
       return jsonError(400, 'INVALID_INPUT', parsed.error.issues[0]?.message || 'Invalid request body');
