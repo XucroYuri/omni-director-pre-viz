@@ -19,6 +19,8 @@ export async function GET(request: NextRequest) {
     const traceId = request.nextUrl.searchParams.get('traceId') || undefined;
     const limitRaw = request.nextUrl.searchParams.get('limit');
     const limit = parseOptionalLimit(limitRaw);
+    const metricsWindowRaw = request.nextUrl.searchParams.get('metricsWindowMinutes');
+    const metricsWindowMinutes = parseOptionalLimit(metricsWindowRaw);
     const auditAction = request.nextUrl.searchParams.get('auditAction') || undefined;
     const auditActor = request.nextUrl.searchParams.get('auditActor') || undefined;
     const auditPageRaw = request.nextUrl.searchParams.get('auditPage');
@@ -27,6 +29,9 @@ export async function GET(request: NextRequest) {
     const auditPageSize = parseOptionalLimit(auditPageSizeRaw);
     if (limitRaw !== null && limit === undefined) {
       return jsonError(400, 'INVALID_QUERY', 'limit must be a positive integer');
+    }
+    if (metricsWindowRaw !== null && metricsWindowMinutes === undefined) {
+      return jsonError(400, 'INVALID_QUERY', 'metricsWindowMinutes must be a positive integer');
     }
     if (auditPageRaw !== null && auditPage === undefined) {
       return jsonError(400, 'INVALID_QUERY', 'auditPage must be a positive integer');
@@ -37,7 +42,17 @@ export async function GET(request: NextRequest) {
 
     const [queue, snapshot] = await Promise.all([
       getTaskQueueMetrics(),
-      getTaskOpsSnapshot({ episodeId, jobKind, traceId, limit, auditAction, auditActor, auditPage, auditPageSize }),
+      getTaskOpsSnapshot({
+        episodeId,
+        jobKind,
+        traceId,
+        limit,
+        metricsWindowMinutes,
+        auditAction,
+        auditActor,
+        auditPage,
+        auditPageSize,
+      }),
     ]);
 
     return NextResponse.json({

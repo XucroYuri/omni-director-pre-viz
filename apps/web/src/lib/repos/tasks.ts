@@ -69,6 +69,35 @@ export type TaskQueueMetrics = {
   deadLetterCount: number;
 };
 
+export type TaskOpsMetricsWindow = {
+  windowMinutes: number;
+  since: string;
+  generatedAt: string;
+  completed: number;
+  failed: number;
+  retried: number;
+  deadLettered: number;
+  completedPerMinute: number;
+  failedPerMinute: number;
+  retriedPerMinute: number;
+  deadLetteredPerMinute: number;
+  failureRate: number;
+  retryRate: number;
+};
+
+export type TaskOpsMetrics = {
+  window: TaskOpsMetricsWindow;
+};
+
+export type TaskOpsAlertLevel = 'info' | 'warn' | 'error';
+
+export type TaskOpsAlert = {
+  level: TaskOpsAlertLevel;
+  code: string;
+  message: string;
+  context?: Record<string, unknown>;
+};
+
 export type TaskKindOpsSummary = {
   job_kind: string;
   queued: number;
@@ -84,6 +113,8 @@ export type TaskOpsSnapshot = {
   recentFailedTasks: TaskRecord[];
   recentDeadLetters: TaskDeadLetterRecord[];
   recentAuditLogs: TaskAuditLogRecord[];
+  metrics?: TaskOpsMetrics;
+  alerts?: TaskOpsAlert[];
   auditPagination: {
     page: number;
     pageSize: number;
@@ -97,6 +128,7 @@ export type TaskOpsSnapshotFilters = {
   jobKind?: string;
   traceId?: string;
   limit?: number;
+  metricsWindowMinutes?: number;
   auditAction?: string;
   auditActor?: string;
   auditPage?: number;
@@ -587,6 +619,29 @@ export async function listTaskAuditLogs(filters: TaskAuditQueryFilters): Promise
   );
 }
 
+export async function hasRecentTaskAuditAction(input: {
+  actor?: string;
+  action: TaskAuditAction;
+  withinMs: number;
+}): Promise<boolean> {
+  const actor = normalizeActor(input.actor);
+  const withinMs = Math.max(0, Math.min(3_600_000, Math.round(input.withinMs)));
+  if (withinMs <= 0) return false;
+  const rows = await queryRows<{ exists: boolean }>(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM task_audit_logs
+        WHERE actor = $1
+          AND action = $2
+          AND created_at > NOW() - ($3::int * INTERVAL '1 millisecond')
+      ) AS exists
+    `,
+    [actor, input.action, withinMs],
+  );
+  return rows[0]?.exists === true;
+}
+
 export async function pruneTaskAuditLogs(input: PruneTaskAuditLogsInput): Promise<PruneTaskAuditLogsResult> {
   const olderThanDays = normalizeLimit(input.olderThanDays, 30, 0, 3650);
   const cutoffAt = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString();
@@ -733,8 +788,126 @@ export async function getTaskQueueMetrics(): Promise<TaskQueueMetrics> {
   );
 }
 
+export async function getTaskOpsMetrics(input: {
+  episodeId?: string;
+  jobKind?: string;
+  traceId?: string;
+  windowMinutes?: number;
+}): Promise<TaskOpsMetrics> {
+  const windowMinutes = normalizeLimit(input.windowMinutes, 60, 1, 1440);
+  const sinceMs = Date.now() - windowMinutes * 60 * 1000;
+  const sinceIso = new Date(sinceMs).toISOString();
+  const generatedAt = new Date().toISOString();
+
+  const whereTasks: string[] = [];
+  const paramsTasks: unknown[] = [];
+  const episodeId = normalizeFilterString(input.episodeId);
+  const jobKind = normalizeFilterString(input.jobKind);
+  const traceId = normalizeFilterString(input.traceId);
+  if (episodeId) {
+    paramsTasks.push(episodeId);
+    whereTasks.push(`episode_id = $${paramsTasks.length}`);
+  }
+  if (jobKind) {
+    paramsTasks.push(jobKind);
+    whereTasks.push(`job_kind = $${paramsTasks.length}`);
+  }
+  if (traceId) {
+    paramsTasks.push(`%${traceId}%`);
+    whereTasks.push(`trace_id ILIKE $${paramsTasks.length}`);
+  }
+  paramsTasks.push(sinceIso);
+  whereTasks.push(`updated_at >= $${paramsTasks.length}`);
+  const whereSqlTasks = `WHERE ${whereTasks.join(' AND ')}`;
+
+  const whereDead: string[] = [];
+  const paramsDead: unknown[] = [];
+  if (episodeId) {
+    paramsDead.push(episodeId);
+    whereDead.push(`episode_id = $${paramsDead.length}`);
+  }
+  if (jobKind) {
+    paramsDead.push(jobKind);
+    whereDead.push(`job_kind = $${paramsDead.length}`);
+  }
+  if (traceId) {
+    paramsDead.push(`%${traceId}%`);
+    whereDead.push(`trace_id ILIKE $${paramsDead.length}`);
+  }
+  paramsDead.push(sinceIso);
+  whereDead.push(`created_at >= $${paramsDead.length}`);
+  const whereSqlDead = `WHERE ${whereDead.join(' AND ')}`;
+
+  const [completedRows, failedRows, retriedRows, deadRows] = await Promise.all([
+    queryRows<{ total: number }>(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM tasks
+        ${whereSqlTasks} AND status = 'completed'
+      `,
+      paramsTasks,
+    ),
+    queryRows<{ total: number }>(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM tasks
+        ${whereSqlTasks} AND status = 'failed'
+      `,
+      paramsTasks,
+    ),
+    queryRows<{ total: number }>(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM tasks
+        ${whereSqlTasks}
+          AND last_attempt_at IS NOT NULL
+          AND last_attempt_at >= $${paramsTasks.length}
+          AND attempt_count >= 2
+      `,
+      paramsTasks,
+    ),
+    queryRows<{ total: number }>(
+      `
+        SELECT COUNT(*)::int AS total
+        FROM task_dead_letters
+        ${whereSqlDead}
+      `,
+      paramsDead,
+    ),
+  ]);
+
+  const completed = completedRows[0]?.total || 0;
+  const failed = failedRows[0]?.total || 0;
+  const retried = retriedRows[0]?.total || 0;
+  const deadLettered = deadRows[0]?.total || 0;
+
+  const perMinute = (count: number) => count / Math.max(1, windowMinutes);
+  const denom = completed + failed;
+  const failureRate = denom > 0 ? failed / denom : 0;
+  const retryRate = denom > 0 ? retried / denom : 0;
+
+  return {
+    window: {
+      windowMinutes,
+      since: sinceIso,
+      generatedAt,
+      completed,
+      failed,
+      retried,
+      deadLettered,
+      completedPerMinute: perMinute(completed),
+      failedPerMinute: perMinute(failed),
+      retriedPerMinute: perMinute(retried),
+      deadLetteredPerMinute: perMinute(deadLettered),
+      failureRate,
+      retryRate,
+    },
+  };
+}
+
 export async function getTaskOpsSnapshot(filters: TaskOpsSnapshotFilters): Promise<TaskOpsSnapshot> {
   const limit = normalizeLimit(filters.limit, 50, 1, 200);
+  const metricsWindowMinutes = normalizeLimit(filters.metricsWindowMinutes, 60, 1, 1440);
   const auditPageSize = normalizeLimit(filters.auditPageSize, limit, 1, 200);
   const auditPage = normalizeLimit(filters.auditPage, 1, 1, 5000);
   const auditOffset = (auditPage - 1) * auditPageSize;
@@ -750,7 +923,7 @@ export async function getTaskOpsSnapshot(filters: TaskOpsSnapshotFilters): Promi
     offset: auditOffset,
   };
 
-  const [taskCounts, deadCounts, recentFailedTasks, recentDeadLetters, auditTotal, recentAuditLogs] = await Promise.all([
+  const [taskCounts, deadCounts, recentFailedTasks, recentDeadLetters, auditTotal, recentAuditLogs, metrics] = await Promise.all([
     queryRows<{
       job_kind: string;
       queued: number;
@@ -806,6 +979,12 @@ export async function getTaskOpsSnapshot(filters: TaskOpsSnapshotFilters): Promi
     ),
     countTaskAuditLogs(auditFilters),
     listTaskAuditLogs(auditFilters),
+    getTaskOpsMetrics({
+      episodeId: filters.episodeId,
+      jobKind: filters.jobKind,
+      traceId: filters.traceId,
+      windowMinutes: metricsWindowMinutes,
+    }),
   ]);
 
   const byKind = new Map<string, TaskKindOpsSummary>();
@@ -837,11 +1016,40 @@ export async function getTaskOpsSnapshot(filters: TaskOpsSnapshotFilters): Promi
     });
   }
 
+  const alerts: TaskOpsAlert[] = [];
+  if (metrics.window.deadLetteredPerMinute >= 2) {
+    alerts.push({
+      level: metrics.window.deadLetteredPerMinute >= 10 ? 'error' : 'warn',
+      code: 'DEAD_LETTER_GROWTH',
+      message: 'Dead-letter growth is elevated in the recent window',
+      context: {
+        windowMinutes: metrics.window.windowMinutes,
+        deadLettered: metrics.window.deadLettered,
+        deadLetteredPerMinute: metrics.window.deadLetteredPerMinute,
+      },
+    });
+  }
+  if (metrics.window.failureRate >= 0.2 && metrics.window.failed + metrics.window.completed >= 10) {
+    alerts.push({
+      level: metrics.window.failureRate >= 0.5 ? 'error' : 'warn',
+      code: 'FAILURE_RATE_ELEVATED',
+      message: 'Failure rate is elevated in the recent window',
+      context: {
+        windowMinutes: metrics.window.windowMinutes,
+        completed: metrics.window.completed,
+        failed: metrics.window.failed,
+        failureRate: metrics.window.failureRate,
+      },
+    });
+  }
+
   return {
     summaryByKind: Array.from(byKind.values()).sort((a, b) => a.job_kind.localeCompare(b.job_kind)),
     recentFailedTasks,
     recentDeadLetters,
     recentAuditLogs,
+    metrics,
+    alerts: alerts.length > 0 ? alerts : undefined,
     auditPagination: {
       page: auditPage,
       pageSize: auditPageSize,
