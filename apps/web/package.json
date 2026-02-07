@@ -1,0 +1,35 @@
+{
+  "name": "omni-director-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3100",
+    "build": "next build",
+    "start": "next start --port 3100",
+    "db:init": "node scripts/init-db.mjs",
+    "clean": "node -e \"require('node:fs').rmSync('.next',{ recursive: true, force: true })\"",
+    "smoke:api": "node scripts/smoke-api.mjs",
+    "e2e:dead-letter-retry": "node scripts/e2e-dead-letter-retry.mjs",
+    "worker": "tsx src/worker/index.ts",
+    "worker:once": "tsx src/worker/index.ts --once"
+  },
+  "dependencies": {
+    "next": "^15.3.0",
+    "pg": "^8.13.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@types/pg": "^8.11.11",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.2"
+  }
+}
