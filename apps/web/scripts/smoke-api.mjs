@@ -176,6 +176,7 @@ async function main() {
         episodeId,
         deadReason: 'max_attempts_exceeded',
         errorCode: 'TASK_EXECUTION_FAILED',
+        taskIds: [retriableFailTaskId],
         limit: 10,
         actor: 'smoke-test',
         reason: 'smoke_bulk_retry',
