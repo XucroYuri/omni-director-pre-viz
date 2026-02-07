@@ -5,6 +5,8 @@
   "type": "commonjs",
   "main": "dist/main/main.js",
   "scripts": {
+    "docs:audit": "node scripts/docs-governance-audit.cjs",
+    "setup:githooks": "node scripts/setup-git-hooks.cjs",
     "dev": "concurrently \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
     "dev:electron": "concurrently \"tsc -p tsconfig.electron.json -w\" \"wait-on tcp:3000 dist/main/main.js dist/preload/preload.js && cross-env NODE_ENV=development node scripts/run-electron-dev.cjs\"",
