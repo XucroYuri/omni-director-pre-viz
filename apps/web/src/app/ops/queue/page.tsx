@@ -106,6 +106,11 @@ type AuditPruneResult = {
   sampleIds: string[];
 };
 
+const DEV_AUTH_HEADERS = {
+  'x-dev-user': 'ops-console',
+  'x-dev-role': 'owner',
+} as const;
+
 const POLL_MS = 3000;
 
 function shortId(value: string | null | undefined): string {
@@ -193,6 +198,7 @@ async function retryTask(taskId: string, payload: { actor?: string; reason?: str
     method: 'POST',
     headers: {
       'content-type': 'application/json',
+      ...DEV_AUTH_HEADERS,
     },
     body: JSON.stringify(payload),
   });
@@ -218,6 +224,7 @@ async function retryDeadLettersInBulk(payload: {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
+      ...DEV_AUTH_HEADERS,
     },
     body: JSON.stringify(payload),
   });
@@ -275,6 +282,7 @@ async function pruneAuditLogs(payload: {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
+      ...DEV_AUTH_HEADERS,
     },
     body: JSON.stringify(payload),
   });
