@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { readJsonBody, runApi } from '@/lib/api';
 import { jsonError } from '@/lib/errors';
 import { episodeExists } from '@/lib/repos/episodes';
+import { getShotById } from '@/lib/repos/shots';
 import { createTask, listTasks } from '@/lib/repos/tasks';
 import { ensurePhase91Schema } from '@/lib/schema';
 
@@ -45,6 +46,15 @@ export async function POST(request: NextRequest) {
     const exists = await episodeExists(input.episodeId);
     if (!exists) {
       return jsonError(404, 'EPISODE_NOT_FOUND', `Episode not found: ${input.episodeId}`);
+    }
+    if (input.shotId) {
+      const shot = await getShotById(input.shotId);
+      if (!shot) {
+        return jsonError(404, 'SHOT_NOT_FOUND', `Shot not found: ${input.shotId}`);
+      }
+      if (shot.episode_id !== input.episodeId) {
+        return jsonError(400, 'SHOT_EPISODE_MISMATCH', 'shotId does not belong to episodeId');
+      }
     }
     const task = await createTask(input);
     return NextResponse.json({ task }, { status: 201 });

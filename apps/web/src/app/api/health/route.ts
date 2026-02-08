@@ -16,10 +16,11 @@ export async function GET() {
       taskQueue,
     });
   } catch (error) {
+    console.error('health check failed', error);
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: 'Internal server error',
       },
       { status: 500 },
     );

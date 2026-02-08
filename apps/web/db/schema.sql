@@ -90,6 +90,34 @@ CREATE TABLE IF NOT EXISTS task_audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE OR REPLACE FUNCTION enforce_task_shot_episode_consistency()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.shot_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM shots s
+    WHERE s.id = NEW.shot_id
+      AND s.episode_id = NEW.episode_id
+  ) THEN
+    RAISE EXCEPTION 'task shot_id % does not belong to episode_id %', NEW.shot_id, NEW.episode_id
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_tasks_episode_shot_consistency ON tasks;
+CREATE TRIGGER trg_tasks_episode_shot_consistency
+BEFORE INSERT OR UPDATE OF episode_id, shot_id
+ON tasks
+FOR EACH ROW
+EXECUTE FUNCTION enforce_task_shot_episode_consistency();
+
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS max_attempts INTEGER NOT NULL DEFAULT 3;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
@@ -107,7 +135,23 @@ ALTER TABLE shots ADD COLUMN IF NOT EXISTS matrix_prompts_json JSONB NOT NULL DE
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS matrix_image_key TEXT;
 ALTER TABLE shots ADD COLUMN IF NOT EXISTS split_image_keys_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 
+WITH ordered_shots AS (
+  SELECT
+    id,
+    ROW_NUMBER() OVER (
+      PARTITION BY episode_id
+      ORDER BY order_index ASC, created_at ASC, id ASC
+    ) AS normalized_order_index
+  FROM shots
+)
+UPDATE shots AS s
+SET order_index = ordered_shots.normalized_order_index
+FROM ordered_shots
+WHERE s.id = ordered_shots.id
+  AND s.order_index <> ordered_shots.normalized_order_index;
+
 CREATE INDEX IF NOT EXISTS idx_shots_episode_id ON shots (episode_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shots_episode_order ON shots (episode_id, order_index);
 CREATE INDEX IF NOT EXISTS idx_assets_episode_id ON assets (episode_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_episode_id ON tasks (episode_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status);

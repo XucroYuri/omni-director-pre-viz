@@ -1,14 +1,12 @@
 import type { TaskRecord } from '../lib/models';
 import { episodeExists, getEpisodeById, getEpisodeSummary } from '../lib/repos/episodes';
 import {
-  countShotsByEpisode,
-  createShot,
   getShotById,
   updateShotMatrixArtifacts,
   updateShotStatus,
   type ShotStatusValue,
 } from '../lib/repos/shots';
-import { createTask } from '../lib/repos/tasks';
+import { ensureEpisodeBreakdown } from '../lib/repos/tasks';
 import { TaskWorkerError } from '../lib/taskErrors';
 import { createS3MediaStore, type MediaStore } from '../lib/media';
 
@@ -155,43 +153,24 @@ export async function executeTask(task: TaskRecord): Promise<Record<string, unkn
         taskId: task.id,
         episodeId,
       });
-      const existing = await countShotsByEpisode(episodeId);
-      assert(existing === 0, 'TASK_PRECONDITION_FAILED', 'episode already has shots; refusing to breakdown again', {
-        taskId: task.id,
-        episodeId,
-        existing,
-      });
 
       const shotInputs = splitScriptToShots(episode.script);
       assert(shotInputs.length > 0, 'TASK_PRECONDITION_FAILED', 'no shots found in script', { taskId: task.id, episodeId });
-
-      const createdShotIds: string[] = [];
-      const createdTaskIds: string[] = [];
-      for (let i = 0; i < shotInputs.length; i += 1) {
-        const input = shotInputs[i];
-        const created = await createShot({
-          episodeId,
-          orderIndex: i + 1,
+      const ensured = await ensureEpisodeBreakdown({
+        episodeId,
+        traceId: task.trace_id,
+        shots: shotInputs.map((input, index) => ({
+          orderIndex: index + 1,
           originalText: input.originalText,
           visualTranslation: input.visualTranslation,
-        });
-        createdShotIds.push(created.id);
-        const matrixTask = await createTask({
-          episodeId,
-          shotId: created.id,
-          type: 'IMAGE',
-          jobKind: 'SHOT_MATRIX_RENDER',
-          payload: {},
-          idempotencyKey: created.id,
-        });
-        createdTaskIds.push(matrixTask.id);
-      }
+        })),
+      });
 
       return {
         episodeId,
-        shotCount: createdShotIds.length,
-        shotIds: createdShotIds,
-        matrixTaskIds: createdTaskIds,
+        shotCount: ensured.shotIds.length,
+        shotIds: ensured.shotIds,
+        matrixTaskIds: ensured.matrixTaskIds,
       };
     }
 

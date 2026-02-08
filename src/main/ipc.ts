@@ -54,6 +54,7 @@ let registered = false;
 export function registerIpcHandlers() {
   if (registered) return;
   registered = true;
+  taskQueue.restore();
 
   ipcMain.handle(IPC_CHANNELS.ping, async () => {
     return 'pong';
@@ -64,8 +65,12 @@ export function registerIpcHandlers() {
     const bytes = input?.bytes as Uint8Array | undefined;
     const mimeType = input?.mimeType as string | undefined;
     const relativeBase = input?.relativeBase as string | undefined;
-    if (!bytes || !mimeType || !relativeBase) throw new Error('media.putBytes requires bytes, mimeType, relativeBase');
-    const { url } = await writeBytesToMedia({ bytes, mimeType, relativeBase });
+    const trimmedMimeType = typeof mimeType === 'string' ? mimeType.trim() : '';
+    const trimmedRelativeBase = typeof relativeBase === 'string' ? relativeBase.trim() : '';
+    if (!(bytes instanceof Uint8Array) || bytes.length === 0 || !trimmedMimeType || !trimmedRelativeBase) {
+      throw new Error('media.putBytes requires non-empty bytes, mimeType, relativeBase');
+    }
+    const { url } = await writeBytesToMedia({ bytes, mimeType: trimmedMimeType, relativeBase: trimmedRelativeBase });
     return url;
   });
   ipcMain.handle(IPC_CHANNELS.app.db.saveEpisode, async (_evt, data) => dbService.saveEpisodeFull(data));

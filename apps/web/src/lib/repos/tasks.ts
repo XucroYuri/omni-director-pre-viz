@@ -205,6 +205,24 @@ export type BulkRetryDeadLettersResult = {
   retriedTaskIds: string[];
 };
 
+export type BreakdownShotInput = {
+  orderIndex: number;
+  originalText: string;
+  visualTranslation: string;
+};
+
+export type EnsureEpisodeBreakdownInput = {
+  episodeId: string;
+  traceId?: string;
+  maxAttempts?: number;
+  shots: BreakdownShotInput[];
+};
+
+export type EnsureEpisodeBreakdownResult = {
+  shotIds: string[];
+  matrixTaskIds: string[];
+};
+
 function normalizeMaxAttempts(value: number | undefined): number {
   if (!Number.isFinite(value)) return 3;
   return Math.min(10, Math.max(1, Math.round(value as number)));
@@ -257,8 +275,12 @@ function normalizeTaskIds(values: string[] | undefined): string[] {
   return taskIds;
 }
 
+type TxClient = {
+  query: <T = unknown>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }>;
+};
+
 async function insertTaskAuditLogTx(
-  client: { query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }> },
+  client: TxClient,
   input: TaskAuditInput,
 ): Promise<void> {
   await client.query(
@@ -291,6 +313,25 @@ async function insertTaskAuditLogTx(
       JSON.stringify(input.metadata || {}),
     ],
   );
+}
+
+async function assertShotBelongsToEpisode(input: { shotId: string; episodeId: string }): Promise<void> {
+  const rows = await queryRows<{ episode_id: string }>(
+    `
+      SELECT episode_id
+      FROM shots
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [input.shotId],
+  );
+  const shot = rows[0];
+  if (!shot) {
+    throw new Error(`SHOT_NOT_FOUND:${input.shotId}`);
+  }
+  if (shot.episode_id !== input.episodeId) {
+    throw new Error(`SHOT_EPISODE_MISMATCH:${input.shotId}`);
+  }
 }
 
 function buildTaskWhere(filters: TaskOpsSnapshotFilters): { whereSql: string; params: unknown[] } {
@@ -473,6 +514,11 @@ export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
   const traceId = (input.traceId || '').trim() || randomUUID();
   const maxAttempts = normalizeMaxAttempts(input.maxAttempts);
   const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey);
+  const shotId = normalizeFilterString(input.shotId || undefined) || null;
+
+  if (shotId) {
+    await assertShotBelongsToEpisode({ shotId, episodeId: input.episodeId });
+  }
 
   const created = await queryRows<TaskRecord>(
     `
@@ -506,7 +552,7 @@ export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
     [
       taskId,
       input.episodeId,
-      input.shotId || null,
+      shotId,
       input.type,
       input.jobKind,
       maxAttempts,
@@ -516,6 +562,119 @@ export async function createTask(input: CreateTaskInput): Promise<TaskRecord> {
     ],
   );
   return created[0];
+}
+
+export async function ensureEpisodeBreakdown(input: EnsureEpisodeBreakdownInput): Promise<EnsureEpisodeBreakdownResult> {
+  const normalizedShots = input.shots
+    .map((shot, index) => ({
+      orderIndex: normalizeLimit(shot.orderIndex, index + 1, 1, 10_000),
+      originalText: (shot.originalText || '').trim(),
+      visualTranslation: (shot.visualTranslation || '').trim(),
+    }))
+    .filter((shot) => shot.originalText.length > 0 || shot.visualTranslation.length > 0);
+  if (normalizedShots.length === 0) {
+    return {
+      shotIds: [],
+      matrixTaskIds: [],
+    };
+  }
+
+  const maxAttempts = normalizeMaxAttempts(input.maxAttempts);
+  const traceId = normalizeFilterString(input.traceId) || randomUUID();
+
+  return withClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const episodeRows = await client.query<{ id: string }>(
+        `
+          SELECT id
+          FROM episodes
+          WHERE id = $1
+          FOR UPDATE
+        `,
+        [input.episodeId],
+      );
+      if (episodeRows.rows.length === 0) {
+        throw new Error(`EPISODE_NOT_FOUND:${input.episodeId}`);
+      }
+
+      const shotIds: string[] = [];
+      const matrixTaskIds: string[] = [];
+
+      for (const shot of normalizedShots) {
+        const upsertedShot = await client.query<{ id: string }>(
+          `
+            INSERT INTO shots (
+              id,
+              episode_id,
+              order_index,
+              original_text,
+              visual_translation,
+              status,
+              created_at,
+              updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())
+            ON CONFLICT (episode_id, order_index)
+            DO UPDATE SET updated_at = shots.updated_at
+            RETURNING id
+          `,
+          [randomUUID(), input.episodeId, shot.orderIndex, shot.originalText, shot.visualTranslation],
+        );
+        const shotId = upsertedShot.rows[0]?.id;
+        if (!shotId) {
+          throw new Error(`BREAKDOWN_SHOT_UPSERT_FAILED:${input.episodeId}:${shot.orderIndex}`);
+        }
+        shotIds.push(shotId);
+
+        const matrixTask = await client.query<{ id: string }>(
+          `
+            INSERT INTO tasks (
+              id,
+              episode_id,
+              shot_id,
+              type,
+              job_kind,
+              status,
+              progress,
+              attempt_count,
+              max_attempts,
+              next_attempt_at,
+              trace_id,
+              idempotency_key,
+              payload_json,
+              result_json,
+              created_at,
+              updated_at
+            )
+            VALUES (
+              $1, $2, $3, 'IMAGE', 'SHOT_MATRIX_RENDER',
+              'queued', NULL, 0, $4, NOW(),
+              $5, $6, '{}'::jsonb, '{}'::jsonb, NOW(), NOW()
+            )
+            ON CONFLICT (episode_id, job_kind, idempotency_key)
+            DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
+            RETURNING id
+          `,
+          [randomUUID(), input.episodeId, shotId, maxAttempts, traceId, shotId],
+        );
+        const matrixTaskId = matrixTask.rows[0]?.id;
+        if (!matrixTaskId) {
+          throw new Error(`BREAKDOWN_TASK_UPSERT_FAILED:${shotId}`);
+        }
+        matrixTaskIds.push(matrixTaskId);
+      }
+
+      await client.query('COMMIT');
+      return {
+        shotIds,
+        matrixTaskIds,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  });
 }
 
 export async function listTasks(filters: { episodeId?: string; status?: TaskStatus }): Promise<TaskRecord[]> {

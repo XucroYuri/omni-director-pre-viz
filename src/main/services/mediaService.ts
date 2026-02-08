@@ -45,14 +45,38 @@ function normalizeKey(key: string) {
   return normalized;
 }
 
-export function keyFromPath(inputPath: string): string {
+function assertPathInsideMediaRoot(inputPath: string): void {
   const root = path.resolve(getMediaRoot());
   const abs = path.resolve(inputPath);
-  if (abs === root) return '';
-  const withSep = root.endsWith(path.sep) ? root : root + path.sep;
+  if (abs === root) return;
+  const withSep = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
   if (!abs.startsWith(withSep)) {
     throw new Error('Path is outside media root');
   }
+}
+
+function sanitizeRelativeBase(relativeBase: string): string {
+  const normalized = normalizeKey(relativeBase.trim()).replace(/\/+/g, '/');
+  if (!normalized) {
+    throw new Error('relativeBase is required');
+  }
+  if (normalized.length > 240) {
+    throw new Error('relativeBase is too long');
+  }
+  const segments = normalized.split('/');
+  for (const segment of segments) {
+    if (!segment || segment === '.' || segment === '..') {
+      throw new Error('relativeBase contains invalid path segments');
+    }
+  }
+  return normalized;
+}
+
+export function keyFromPath(inputPath: string): string {
+  const root = path.resolve(getMediaRoot());
+  const abs = path.resolve(inputPath);
+  assertPathInsideMediaRoot(abs);
+  if (abs === root) return '';
   return normalizeKey(path.relative(root, abs));
 }
 
@@ -89,8 +113,10 @@ export function resolveUrlToPath(url: string): string {
 export async function writeBytesToMedia(input: MediaWriteInput): Promise<{ key: string; path: string; url: string }> {
   const ext = extFromMime(input.mimeType);
   const hash = createHash('sha1').update(input.bytes).digest('hex').slice(0, 10);
-  const relativePath = normalizeKey(`${input.relativeBase}_${hash}${ext}`);
-  const absPath = path.join(getMediaRoot(), relativePath);
+  const safeRelativeBase = sanitizeRelativeBase(input.relativeBase);
+  const relativePath = normalizeKey(`${safeRelativeBase}_${hash}${ext}`);
+  const absPath = path.resolve(getMediaRoot(), relativePath);
+  assertPathInsideMediaRoot(absPath);
   await ensureDirForFile(absPath);
   await fs.writeFile(absPath, Buffer.from(input.bytes));
   return { key: relativePath, path: absPath, url: urlFromKey(relativePath) };
@@ -146,6 +172,12 @@ export function resolveMediaRefToFilePath(value: string): string | null {
   if (value.includes('://')) {
     return null;
   }
-  const root = getMediaRoot();
-  return path.isAbsolute(value) ? value : path.join(root, value);
+  const root = path.resolve(getMediaRoot());
+  const abs = path.isAbsolute(value) ? path.resolve(value) : path.resolve(root, value);
+  try {
+    assertPathInsideMediaRoot(abs);
+    return abs;
+  } catch {
+    return null;
+  }
 }
