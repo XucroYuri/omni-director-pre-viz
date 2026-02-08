@@ -82,7 +82,11 @@ function isDev() {
 }
 
 function getPreloadPath() {
-  return path.join(app.getAppPath(), 'dist', 'preload', 'preload.js');
+  return path.resolve(__dirname, '..', 'preload', 'preload.js');
+}
+
+function getRendererIndexPath() {
+  return path.resolve(__dirname, '..', 'renderer', 'index.html');
 }
 
 function sleep(ms: number) {
@@ -108,7 +112,7 @@ function createDevOfflineHtml(lastError?: string) {
 
 async function loadMainContent(win: BrowserWindow) {
   if (!isDev()) {
-    const indexHtml = path.join(app.getAppPath(), 'dist', 'renderer', 'index.html');
+    const indexHtml = getRendererIndexPath();
     await win.loadFile(indexHtml);
     return;
   }
@@ -186,8 +190,13 @@ async function createMainWindow() {
       preload: getPreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: !isDev(),
+      // Keep preload module loading stable in packaged builds.
+      sandbox: false,
     },
+  });
+
+  mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
+    console.error(`[main] preload-error @ ${preloadPath}: ${error?.message || error}`);
   });
 
   mainWindow.once('ready-to-show', () => {
