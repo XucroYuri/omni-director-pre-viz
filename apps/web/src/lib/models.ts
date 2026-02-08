@@ -1,6 +1,8 @@
 export type EpisodeRecord = {
   id: string;
   title: string;
+  script: string;
+  context: string;
   created_at: string;
   updated_at: string;
 };
@@ -11,6 +13,9 @@ export type ShotRecord = {
   order_index: number;
   original_text: string;
   visual_translation: string;
+  matrix_prompts_json: unknown[];
+  matrix_image_key: string | null;
+  split_image_keys_json: unknown[];
   status: string;
   created_at: string;
   updated_at: string;

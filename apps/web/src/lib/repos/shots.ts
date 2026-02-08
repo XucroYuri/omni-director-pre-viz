@@ -11,10 +11,24 @@ type CreateShotInput = {
 
 export type ShotStatusValue = 'pending' | 'processing' | 'completed' | 'failed';
 
+export async function countShotsByEpisode(episodeId: string): Promise<number> {
+  const rows = await queryRows<{ total: number }>(
+    `
+      SELECT COUNT(*)::int AS total
+      FROM shots
+      WHERE episode_id = $1
+    `,
+    [episodeId],
+  );
+  return rows[0]?.total || 0;
+}
+
 export async function listShotsByEpisode(episodeId: string): Promise<ShotRecord[]> {
   return queryRows<ShotRecord>(
     `
-      SELECT id, episode_id, order_index, original_text, visual_translation, status, created_at, updated_at
+      SELECT id, episode_id, order_index, original_text, visual_translation,
+        matrix_prompts_json, matrix_image_key, split_image_keys_json,
+        status, created_at, updated_at
       FROM shots
       WHERE episode_id = $1
       ORDER BY order_index ASC, created_at ASC
@@ -56,7 +70,9 @@ export async function createShot(input: CreateShotInput): Promise<{
 export async function getShotById(shotId: string): Promise<ShotRecord | null> {
   const rows = await queryRows<ShotRecord>(
     `
-      SELECT id, episode_id, order_index, original_text, visual_translation, status, created_at, updated_at
+      SELECT id, episode_id, order_index, original_text, visual_translation,
+        matrix_prompts_json, matrix_image_key, split_image_keys_json,
+        status, created_at, updated_at
       FROM shots
       WHERE id = $1
       LIMIT 1
@@ -72,9 +88,38 @@ export async function updateShotStatus(shotId: string, status: ShotStatusValue):
       UPDATE shots
       SET status = $2, updated_at = NOW()
       WHERE id = $1
-      RETURNING id, episode_id, order_index, original_text, visual_translation, status, created_at, updated_at
+      RETURNING id, episode_id, order_index, original_text, visual_translation,
+        matrix_prompts_json, matrix_image_key, split_image_keys_json,
+        status, created_at, updated_at
     `,
     [shotId, status],
+  );
+  return rows[0] || null;
+}
+
+export async function updateShotMatrixArtifacts(input: {
+  shotId: string;
+  status?: ShotStatusValue;
+  matrixPrompts: unknown[];
+  matrixImageKey: string | null;
+  splitImageKeys: unknown[];
+}): Promise<ShotRecord | null> {
+  const status = input.status;
+  const rows = await queryRows<ShotRecord>(
+    `
+      UPDATE shots
+      SET
+        status = COALESCE($2, status),
+        matrix_prompts_json = $3::jsonb,
+        matrix_image_key = $4,
+        split_image_keys_json = $5::jsonb,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, episode_id, order_index, original_text, visual_translation,
+        matrix_prompts_json, matrix_image_key, split_image_keys_json,
+        status, created_at, updated_at
+    `,
+    [input.shotId, status ?? null, JSON.stringify(input.matrixPrompts || []), input.matrixImageKey, JSON.stringify(input.splitImageKeys || [])],
   );
   return rows[0] || null;
 }

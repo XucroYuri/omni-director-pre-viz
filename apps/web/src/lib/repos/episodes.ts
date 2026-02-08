@@ -5,7 +5,7 @@ import { queryRows } from '../db';
 export async function listEpisodes(): Promise<EpisodeRecord[]> {
   return queryRows<EpisodeRecord>(
     `
-      SELECT id, title, created_at, updated_at
+      SELECT id, title, script, context, created_at, updated_at
       FROM episodes
       ORDER BY updated_at DESC
     `,
@@ -20,13 +20,45 @@ export async function createEpisode(title?: string): Promise<{ id: string; title
 
   await queryRows(
     `
-      INSERT INTO episodes (id, title, created_at, updated_at)
-      VALUES ($1, $2, NOW(), NOW())
+      INSERT INTO episodes (id, title, script, context, created_at, updated_at)
+      VALUES ($1, $2, '', '', NOW(), NOW())
     `,
     [episode.id, episode.title],
   );
 
   return episode;
+}
+
+export async function getEpisodeById(episodeId: string): Promise<EpisodeRecord | null> {
+  const rows = await queryRows<EpisodeRecord>(
+    `
+      SELECT id, title, script, context, created_at, updated_at
+      FROM episodes
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [episodeId],
+  );
+  return rows[0] || null;
+}
+
+export async function updateEpisodeScript(input: {
+  episodeId: string;
+  script: string;
+  context?: string;
+}): Promise<EpisodeRecord | null> {
+  const script = input.script || '';
+  const context = input.context || '';
+  const rows = await queryRows<EpisodeRecord>(
+    `
+      UPDATE episodes
+      SET script = $2, context = $3, updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, title, script, context, created_at, updated_at
+    `,
+    [input.episodeId, script, context],
+  );
+  return rows[0] || null;
 }
 
 export async function episodeExists(episodeId: string): Promise<boolean> {

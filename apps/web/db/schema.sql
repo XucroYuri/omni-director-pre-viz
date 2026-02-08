@@ -1,6 +1,8 @@
 CREATE TABLE IF NOT EXISTS episodes (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
+  script TEXT NOT NULL DEFAULT '',
+  context TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -11,6 +13,9 @@ CREATE TABLE IF NOT EXISTS shots (
   order_index INTEGER NOT NULL DEFAULT 0,
   original_text TEXT NOT NULL DEFAULT '',
   visual_translation TEXT NOT NULL DEFAULT '',
+  matrix_prompts_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  matrix_image_key TEXT,
+  split_image_keys_json JSONB NOT NULL DEFAULT '[]'::jsonb,
   status TEXT NOT NULL DEFAULT 'pending',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -94,6 +99,13 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
 UPDATE tasks SET trace_id = id WHERE trace_id IS NULL OR trace_id = '';
+
+ALTER TABLE episodes ADD COLUMN IF NOT EXISTS script TEXT NOT NULL DEFAULT '';
+ALTER TABLE episodes ADD COLUMN IF NOT EXISTS context TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE shots ADD COLUMN IF NOT EXISTS matrix_prompts_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE shots ADD COLUMN IF NOT EXISTS matrix_image_key TEXT;
+ALTER TABLE shots ADD COLUMN IF NOT EXISTS split_image_keys_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_shots_episode_id ON shots (episode_id);
 CREATE INDEX IF NOT EXISTS idx_assets_episode_id ON assets (episode_id);
