@@ -1,10 +1,12 @@
 import { app } from 'electron';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { episodeRepo, type DBEpisode } from '../db/repos/episodeRepo';
 import { shotRepo, type DBShot } from '../db/repos/shotRepo';
 import { assetRepo, type DBAsset } from '../db/repos/assetRepo';
 import type { EpisodeData, Shot, Character, Scene, Prop } from '../../shared/types';
+import { keyFromPath, resolveUrlToPath, urlFromPath, readFileAsDataUri } from './mediaService';
 
 // Helper to parse JSON safely
 function parseJson<T>(jsonStr: string | null, fallback: T): T {
@@ -80,6 +82,15 @@ async function persistMedia(value: string | undefined, relativeBase: string) {
   if (value.startsWith('data:')) {
     return writeDataUriFile(value, relativeBase);
   }
+  if (value.startsWith('omni-media://')) {
+    const srcPath = resolveUrlToPath(value);
+    try {
+      return keyFromPath(srcPath);
+    } catch {
+      const ext = path.extname(srcPath);
+      return copyFileTo(`${relativeBase}${ext}`, srcPath);
+    }
+  }
   if (value.startsWith('file://')) {
     const srcPath = value.replace('file://', '');
     const ext = path.extname(srcPath);
@@ -91,16 +102,40 @@ async function persistMedia(value: string | undefined, relativeBase: string) {
   return null;
 }
 
-async function readMedia(relativePath: string | null) {
-  if (!relativePath) return undefined;
-  if (relativePath.startsWith('data:')) return relativePath;
-  const resolvedPath = relativePath.startsWith('file://')
-    ? relativePath.replace('file://', '')
-    : path.join(getMediaRoot(), relativePath);
+async function readMediaUrl(storedPath: string | null) {
+  if (!storedPath) return undefined;
+  if (storedPath.startsWith('omni-media://')) return storedPath;
+  if (storedPath.startsWith('data:')) {
+    const hash = createHash('sha1').update(storedPath).digest('hex').slice(0, 12);
+    const relativePath = await writeDataUriFile(storedPath, path.join('legacy', 'inline', hash));
+    const absPath = path.join(getMediaRoot(), relativePath);
+    return urlFromPath(absPath);
+  }
+  const resolvedPath = storedPath.startsWith('file://')
+    ? storedPath.replace('file://', '')
+    : path.isAbsolute(storedPath)
+      ? storedPath
+      : path.join(getMediaRoot(), storedPath);
   try {
-    const buf = await fs.readFile(resolvedPath);
-    const mimeType = mimeFromPath(resolvedPath);
-    return `data:${mimeType};base64,${buf.toString('base64')}`;
+    await fs.stat(resolvedPath);
+    return urlFromPath(resolvedPath);
+  } catch {
+    return undefined;
+  }
+}
+
+async function readMediaDataUri(storedPath: string | null) {
+  if (!storedPath) return undefined;
+  if (storedPath.startsWith('data:')) return storedPath;
+  const resolvedPath = storedPath.startsWith('omni-media://')
+    ? resolveUrlToPath(storedPath)
+    : storedPath.startsWith('file://')
+      ? storedPath.replace('file://', '')
+      : path.isAbsolute(storedPath)
+        ? storedPath
+        : path.join(getMediaRoot(), storedPath);
+  try {
+    return await readFileAsDataUri(resolvedPath);
   } catch {
     return undefined;
   }
@@ -243,7 +278,7 @@ export const dbService = {
     }
   },
 
-  async loadEpisode(episodeId: string): Promise<EpisodeData | null> {
+  async loadEpisode(episodeId: string, options?: { mediaFormat?: 'url' | 'dataUri' }): Promise<EpisodeData | null> {
     const ep = episodeRepo.get(episodeId);
     if (!ep) return null;
 
@@ -260,7 +295,10 @@ export const dbService = {
         id: a.id,
         name: a.name,
         description: a.description || '',
-        refImage: await readMedia(a.ref_image_path),
+        refImage:
+          options?.mediaFormat === 'dataUri'
+            ? await readMediaDataUri(a.ref_image_path)
+            : await readMediaUrl(a.ref_image_path),
         tags: parseJson<string[]>(a.tags_json, [])
       };
       if (a.type === 'character') characters.push(assetObj);
@@ -271,10 +309,16 @@ export const dbService = {
     // Transform Shots
     const shots: Shot[] = await Promise.all(
       dbShots.map(async (s) => {
-        const splitPaths = parseJson<string[]>(s.split_images_json, []);
-        const splitImages = await Promise.all(splitPaths.map((p) => readMedia(p)));
+        const splitPaths = parseJson<(string | null)[]>(s.split_images_json, []);
+        const splitImages =
+          options?.mediaFormat === 'dataUri'
+            ? await Promise.all(splitPaths.map((p) => (p ? readMediaDataUri(p) : undefined)))
+            : await Promise.all(splitPaths.map((p) => (p ? readMediaUrl(p) : undefined)));
         const videoPaths = parseJson<(string | null)[]>(s.video_urls_json, []);
-        const videoUrls = await Promise.all(videoPaths.map((p) => readMedia(p)));
+        const videoUrls =
+          options?.mediaFormat === 'dataUri'
+            ? await Promise.all(videoPaths.map((p) => (p ? readMediaDataUri(p) : undefined)))
+            : await Promise.all(videoPaths.map((p) => (p ? readMediaUrl(p) : undefined)));
 
         return {
           id: s.id,
@@ -283,15 +327,24 @@ export const dbService = {
           contextTag: s.context_tag || '',
           shotKind: (s.shot_kind as any) || undefined,
           matrixPrompts: parseJson(s.matrix_prompts_json, []),
-          generatedImageUrl: await readMedia(s.generated_image_path),
-          splitImages,
-          videoUrls,
-          animaticVideoUrl: await readMedia(s.animatic_video_path),
-          assetVideoUrl: await readMedia(s.asset_video_path),
+          generatedImageUrl:
+            options?.mediaFormat === 'dataUri'
+              ? await readMediaDataUri(s.generated_image_path)
+              : await readMediaUrl(s.generated_image_path),
+          splitImages: (splitImages.map((v) => v || '') as unknown as string[]),
+          videoUrls: (videoUrls.map((v) => v ?? null) as unknown as (string | null)[]),
+          animaticVideoUrl:
+            options?.mediaFormat === 'dataUri'
+              ? await readMediaDataUri(s.animatic_video_path)
+              : await readMediaUrl(s.animatic_video_path),
+          assetVideoUrl:
+            options?.mediaFormat === 'dataUri'
+              ? await readMediaDataUri(s.asset_video_path)
+              : await readMediaUrl(s.asset_video_path),
           status: (s.status as any) || 'pending',
           videoStatus: parseJson(s.video_status_json, []),
           progress: s.progress || 0,
-          history: parseJson(s.history_json, []),
+          history: options?.mediaFormat === 'dataUri' ? parseJson(s.history_json, []) : undefined,
           optimization: parseJson(s.optimization_json, undefined),
           characterIds: parseJson(s.character_ids_json, []),
           sceneIds: parseJson(s.scene_ids_json, []),
