@@ -5,6 +5,34 @@ import { registerIpcHandlers } from './ipc';
 import { loadLocalEnvFiles } from './loadEnv';
 import { registerMediaProtocol } from './services/mediaProtocol';
 
+function installStdioBrokenPipeGuards() {
+  const methods: Array<'log' | 'info' | 'warn' | 'error'> = ['log', 'info', 'warn', 'error'];
+  for (const method of methods) {
+    const original = console[method].bind(console);
+    (console as any)[method] = (...args: any[]) => {
+      try {
+        original(...args);
+      } catch (error: any) {
+        if (error?.code === 'EPIPE') {
+          return;
+        }
+        throw error;
+      }
+    };
+  }
+
+  const swallowBrokenPipe = (error: any) => {
+    if (error?.code === 'EPIPE') {
+      return;
+    }
+  };
+
+  process.stdout?.on('error', swallowBrokenPipe);
+  process.stderr?.on('error', swallowBrokenPipe);
+}
+
+installStdioBrokenPipeGuards();
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'omni-media',
