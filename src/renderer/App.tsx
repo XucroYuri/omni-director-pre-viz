@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import MatrixPromptEditor from './components/MatrixPromptEditor';
+import GlobalOpsPanel from './components/GlobalOpsPanel';
 import { DBTask, GlobalConfig, Shot, ScriptBreakdownResponse } from '@shared/types';
 import { DEFAULT_STYLE } from '@shared/constants';
 import { AlertCircle, BookOpenText, CheckCircle2, Cpu, Info, Keyboard, Settings, X } from 'lucide-react';
@@ -148,6 +149,8 @@ const App: React.FC = () => {
   const [isSavingEpisode, setIsSavingEpisode] = useState(false);
   const [isLoadingEpisode, setIsLoadingEpisode] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [createZip, setCreateZip] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isAutoLinking, setIsAutoLinking] = useState(false);
   const [apiStatus, setApiStatus] = useState<ApiStatus>('idle');
@@ -481,6 +484,44 @@ const App: React.FC = () => {
     [hideOnboarding, pushNotice, runBreakdownForScript],
   );
 
+  const handleExportEpisode = useCallback(async () => {
+    if (isExporting) return;
+    if (!isElectronRuntime || !window.api?.app) {
+      pushNotice('error', '导出仅在 Electron 桌面端可用。');
+      return;
+    }
+
+    const exportShots = shots.filter((shot) => Boolean(shot.generatedImageUrl));
+    if (exportShots.length === 0) {
+      pushNotice('info', '当前没有可导出的镜头，请先生成母图。');
+      return;
+    }
+
+    const exportEpisodeId = `EP_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+    setIsExporting(true);
+    try {
+      const result = await window.api.app.exportEpisode({
+        episodeId: exportEpisodeId,
+        shots: exportShots,
+        config,
+        includeVideos: true,
+        createZip,
+      });
+      if (result.success) {
+        pushNotice(
+          'success',
+          `导出成功：${result.outputPath}${result.zipPath ? `（ZIP: ${result.zipPath}）` : ''}`,
+        );
+      } else {
+        pushNotice('error', `导出失败：${result.error}`);
+      }
+    } catch (err: any) {
+      pushNotice('error', `系统错误：${err?.message || err}`);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [config, createZip, isElectronRuntime, isExporting, pushNotice, shots]);
+
   const handleSaveEpisode = useCallback(async () => {
     if (isSavingEpisode) return;
     if (!window.api?.app?.db) {
@@ -627,16 +668,8 @@ const App: React.FC = () => {
         setScript={setScript}
         handleBreakdown={handleBreakdown}
         episodeId={episodeId}
-        setEpisodeId={setEpisodeId}
-        onSaveEpisode={handleSaveEpisode}
-        onLoadEpisode={handleLoadEpisode}
-        isSavingEpisode={isSavingEpisode}
-        isLoadingEpisode={isLoadingEpisode}
         isElectronRuntime={isElectronRuntime}
         notify={pushNotice}
-        scriptTemplates={SCRIPT_TEMPLATES}
-        onApplyScriptTemplate={handleApplyScriptTemplate}
-        onQuickStart={handleQuickStart}
       />
 
       <div className="flex-1 flex flex-col">
@@ -707,6 +740,7 @@ const App: React.FC = () => {
               allShots={shots}
               config={config}
               episodeId={episodeId}
+              onUpdateConfig={(updates) => setConfig((prev) => ({ ...prev, ...updates }))}
               onUpdatePrompts={(p) => updateShot(selectedShot.id, { matrixPrompts: p })}
               onUpdateShot={(u) => updateShot(selectedShot.id, u)}
               onGenerateImage={() => handleGenerateImage(selectedShot.id)}
@@ -777,6 +811,21 @@ const App: React.FC = () => {
           )}
         </main>
       </div>
+
+      <GlobalOpsPanel
+        shots={shots}
+        episodeId={episodeId}
+        setEpisodeId={setEpisodeId}
+        onSaveEpisode={handleSaveEpisode}
+        onLoadEpisode={handleLoadEpisode}
+        onExportEpisode={handleExportEpisode}
+        isSavingEpisode={isSavingEpisode}
+        isLoadingEpisode={isLoadingEpisode}
+        isExporting={isExporting}
+        createZip={createZip}
+        setCreateZip={setCreateZip}
+        isElectronRuntime={isElectronRuntime}
+      />
 
       {notices.length > 0 && (
         <div className="fixed bottom-6 right-6 z-[320] flex flex-col gap-2 max-w-[420px]">

@@ -21,6 +21,7 @@ interface MatrixPromptEditorProps {
   allShots: Shot[];
   config: GlobalConfig;
   episodeId: string;
+  onUpdateConfig: (updates: Partial<GlobalConfig>) => void;
   onUpdatePrompts: (prompts: string[]) => void;
   onUpdateShot: (updates: Partial<Shot>) => void;
   onGenerateImage: () => void;
@@ -38,7 +39,7 @@ interface MatrixPromptEditorProps {
 }
 
 const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({ 
-  shot, allShots, config, episodeId, onUpdatePrompts, onUpdateShot, onGenerateImage, onRestoreHistory, 
+  shot, allShots, config, episodeId, onUpdateConfig, onUpdatePrompts, onUpdateShot, onGenerateImage, onRestoreHistory, 
   onAddGlobalAsset, onDeleteGlobalAsset, onUpdateGlobalAsset, onOptimizePrompts, 
   onAutoLinkAssets, isGeneratingImage, isOptimizing, isAutoLinking,
   isRebuildingCache
@@ -56,6 +57,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
   const [showAnimaticPreview, setShowAnimaticPreview] = useState(false);
   const [isGeneratingAssetVideo, setIsGeneratingAssetVideo] = useState(false);
   const [showAssetVideoPreview, setShowAssetVideoPreview] = useState(false);
+  const [showRenderSettings, setShowRenderSettings] = useState(true);
   const videoTimersRef = useRef<Record<number, { processing?: ReturnType<typeof setTimeout>; downloading?: ReturnType<typeof setTimeout> }>>({});
 
   const prompts = shot.matrixPrompts || Array(9).fill('');
@@ -328,6 +330,12 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowRenderSettings((prev) => !prev)}
+            className="h-9 px-3 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+          >
+            {showRenderSettings ? '收起参数' : '生成参数'}
+          </button>
           <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-2 h-9">
             <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Shot Kind</span>
             <select
@@ -396,6 +404,42 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
           </button>
         </div>
       </div>
+
+      {showRenderSettings && (
+        <div className="border-b border-white/10 bg-[#121722] px-6 py-3 grid grid-cols-1 md:grid-cols-[170px_170px_1fr] gap-3 shrink-0">
+          <label className="text-[9px] font-black uppercase tracking-widest text-slate-500">
+            画幅比例
+            <select
+              className="mt-2 w-full h-9 bg-black/40 border border-white/10 rounded-lg px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40"
+              value={config.aspectRatio}
+              onChange={(e) => onUpdateConfig({ aspectRatio: e.target.value as GlobalConfig['aspectRatio'] })}
+            >
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+            </select>
+          </label>
+
+          <label className="text-[9px] font-black uppercase tracking-widest text-slate-500">
+            输出分辨率
+            <select
+              className="mt-2 w-full h-9 bg-black/40 border border-white/10 rounded-lg px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40"
+              value={config.resolution}
+              onChange={(e) => onUpdateConfig({ resolution: e.target.value as GlobalConfig['resolution'] })}
+            >
+              <option value="2K">2K</option>
+            </select>
+          </label>
+
+          <label className="text-[9px] font-black uppercase tracking-widest text-slate-500">
+            美术风格（全局）
+            <textarea
+              className="mt-2 w-full h-20 bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px] text-slate-200 outline-none resize-none focus:border-indigo-500/40"
+              value={config.artStyle}
+              onChange={(e) => onUpdateConfig({ artStyle: e.target.value })}
+            />
+          </label>
+        </div>
+      )}
 
       {inlineHints.length > 0 && (
         <div className="border-b border-white/10 bg-amber-500/10 px-6 py-2 flex flex-wrap items-center gap-2 shrink-0">
