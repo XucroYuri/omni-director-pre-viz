@@ -19,10 +19,40 @@ const STORAGE_KEYS = {
   EPISODE_ID: 'OMNI_DIRECTOR_EPISODE_ID'
 };
 
+function safeJsonParse<T>(value: string | null, fallback: T): T {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function isDataUri(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('data:');
+}
+
+function stripDataUri(value: unknown): string | undefined {
+  if (isDataUri(value)) return undefined;
+  return typeof value === 'string' ? value : undefined;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
 const App: React.FC = () => {
   const [config, setConfig] = useState<GlobalConfig>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.CONFIG);
-    if (saved) return JSON.parse(saved);
+    const parsed = safeJsonParse<GlobalConfig | null>(saved, null);
+    if (parsed) {
+      return {
+        ...parsed,
+        characters: parsed.characters.map((c) => ({ ...c, refImage: stripDataUri(c.refImage) })),
+        scenes: parsed.scenes.map((s) => ({ ...s, refImage: stripDataUri(s.refImage) })),
+        props: parsed.props.map((p) => ({ ...p, refImage: stripDataUri(p.refImage) })),
+      };
+    }
     return {
       artStyle: DEFAULT_STYLE,
       aspectRatio: '16:9',
@@ -37,7 +67,20 @@ const App: React.FC = () => {
   const [script, setScript] = useState(() => localStorage.getItem(STORAGE_KEYS.SCRIPT) || '');
   const [breakdown, setBreakdown] = useState<ScriptBreakdownResponse | null>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.BREAKDOWN);
-    return saved ? JSON.parse(saved) : null;
+    const parsed = safeJsonParse<ScriptBreakdownResponse | null>(saved, null);
+    if (!parsed) return null;
+    return {
+      ...parsed,
+      shots: (parsed.shots || []).map((shot) => ({
+        ...shot,
+        generatedImageUrl: stripDataUri(shot.generatedImageUrl),
+        splitImages: shot.splitImages?.map((img) => stripDataUri(img)).filter(isNonEmptyString),
+        videoUrls: shot.videoUrls?.map((url) => stripDataUri(url) ?? null),
+        animaticVideoUrl: stripDataUri(shot.animaticVideoUrl),
+        assetVideoUrl: stripDataUri(shot.assetVideoUrl),
+        history: undefined,
+      })),
+    };
   });
   const [selectedShotId, setSelectedShotId] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.SELECTED_SHOT_ID) || null);
   const [episodeId, setEpisodeId] = useState(() => {
@@ -53,6 +96,9 @@ const App: React.FC = () => {
   const [apiStatus, setApiStatus] = useState<'connected' | 'error' | 'idle'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const isReloadingRef = useRef(false);
+  const persistTimers = useRef<{ config?: number; script?: number; breakdown?: number; selected?: number }>(
+    {},
+  );
 
   const normalizePolicyError = (message: string) => {
     if (!message) return message;
@@ -62,12 +108,83 @@ const App: React.FC = () => {
     return '生成失败：未满足资产绑定规则。';
   };
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(config)); }, [config]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.SCRIPT, script); }, [script]);
-  useEffect(() => { 
-    if (breakdown) localStorage.setItem(STORAGE_KEYS.BREAKDOWN, JSON.stringify(breakdown));
+  useEffect(() => {
+    const timer = persistTimers.current.config;
+    if (timer) window.clearTimeout(timer);
+
+    const sanitized: GlobalConfig = {
+      ...config,
+      characters: config.characters.map((c) => ({ ...c, refImage: stripDataUri(c.refImage) })),
+      scenes: config.scenes.map((s) => ({ ...s, refImage: stripDataUri(s.refImage) })),
+      props: config.props.map((p) => ({ ...p, refImage: stripDataUri(p.refImage) })),
+    };
+
+    persistTimers.current.config = window.setTimeout(() => {
+      localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(sanitized));
+    }, 400);
+
+    return () => {
+      const t = persistTimers.current.config;
+      if (t) window.clearTimeout(t);
+    };
+  }, [config]);
+
+  useEffect(() => {
+    const timer = persistTimers.current.script;
+    if (timer) window.clearTimeout(timer);
+    persistTimers.current.script = window.setTimeout(() => {
+      localStorage.setItem(STORAGE_KEYS.SCRIPT, script);
+    }, 400);
+    return () => {
+      const t = persistTimers.current.script;
+      if (t) window.clearTimeout(t);
+    };
+  }, [script]);
+
+  useEffect(() => {
+    const timer = persistTimers.current.breakdown;
+    if (timer) window.clearTimeout(timer);
+    if (!breakdown) return;
+
+    const sanitized: ScriptBreakdownResponse = {
+      ...breakdown,
+      shots: breakdown.shots.map((shot) => ({
+        ...shot,
+        generatedImageUrl: stripDataUri(shot.generatedImageUrl),
+        splitImages: shot.splitImages?.map((img) => stripDataUri(img)).filter(isNonEmptyString),
+        videoUrls: shot.videoUrls?.map((url) => stripDataUri(url) ?? null),
+        animaticVideoUrl: stripDataUri(shot.animaticVideoUrl),
+        assetVideoUrl: stripDataUri(shot.assetVideoUrl),
+        history: undefined,
+      })),
+    };
+
+    persistTimers.current.breakdown = window.setTimeout(() => {
+      localStorage.setItem(STORAGE_KEYS.BREAKDOWN, JSON.stringify(sanitized));
+    }, 900);
+
+    return () => {
+      const t = persistTimers.current.breakdown;
+      if (t) window.clearTimeout(t);
+    };
   }, [breakdown]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.EPISODE_ID, episodeId); }, [episodeId]);
+
+  useEffect(() => {
+    const timer = persistTimers.current.selected;
+    if (timer) window.clearTimeout(timer);
+    persistTimers.current.selected = window.setTimeout(() => {
+      if (selectedShotId) localStorage.setItem(STORAGE_KEYS.SELECTED_SHOT_ID, selectedShotId);
+      else localStorage.removeItem(STORAGE_KEYS.SELECTED_SHOT_ID);
+    }, 200);
+    return () => {
+      const t = persistTimers.current.selected;
+      if (t) window.clearTimeout(t);
+    };
+  }, [selectedShotId]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.EPISODE_ID, episodeId);
+  }, [episodeId]);
 
   const updateShot = (id: string, updates: Partial<Shot>) => {
     setBreakdown(prev => {

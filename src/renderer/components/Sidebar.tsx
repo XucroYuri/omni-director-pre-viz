@@ -156,11 +156,24 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const handleFileUpload = (type: 'characters' | 'scenes' | 'props', id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => updateItem(type, id, { refImage: reader.result });
-      reader.readAsDataURL(file);
+    if (!file) return;
+    if (!window.api?.app?.media?.putBytes) {
+      alert('媒体写入仅在 Electron 环境可用。');
+      return;
     }
+    (async () => {
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const mimeType = file.type || 'application/octet-stream';
+        const relativeBase = `episodes/${episodeId}/assets/${id}/ref_upload`;
+        const url = await window.api!.app.media.putBytes({ bytes, mimeType, relativeBase });
+        updateItem(type, id, { refImage: url });
+      } catch (err: any) {
+        alert(`上传失败: ${err?.message || err}`);
+      } finally {
+        e.target.value = '';
+      }
+    })();
   };
 
   const handleEnhanceDescription = async (type: 'characters' | 'scenes' | 'props', id: string) => {
