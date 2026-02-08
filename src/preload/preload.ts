@@ -10,6 +10,9 @@ const api: PreloadApi = {
   ping: () => ipcRenderer.invoke(IPC_CHANNELS.ping),
   app: {
     exportEpisode: (options) => ipcRenderer.invoke(IPC_CHANNELS.app.exportEpisode, options),
+    media: {
+      putBytes: (input) => ipcRenderer.invoke(IPC_CHANNELS.app.media.putBytes, input),
+    },
     db: {
       saveEpisode: (data) => ipcRenderer.invoke(IPC_CHANNELS.app.db.saveEpisode, data),
       loadEpisode: (episodeId) => ipcRenderer.invoke(IPC_CHANNELS.app.db.loadEpisode, episodeId),

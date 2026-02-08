@@ -14,6 +14,9 @@ export const IPC_CHANNELS = {
   ping: 'app:ping',
   app: {
     exportEpisode: 'app:exportEpisode',
+    media: {
+      putBytes: 'app:media:putBytes',
+    },
     db: {
       saveEpisode: 'app:db:saveEpisode',
       loadEpisode: 'app:db:loadEpisode',
@@ -51,6 +54,9 @@ export type PreloadApi = {
   ping: () => Promise<string>;
   app: {
     exportEpisode: (options: ExportOptions) => Promise<ExportResult>;
+    media: {
+      putBytes: (input: { bytes: Uint8Array; mimeType: string; relativeBase: string }) => Promise<string>;
+    };
     db: {
       saveEpisode: (data: EpisodeData) => Promise<void>;
       loadEpisode: (episodeId: string) => Promise<EpisodeData | null>;
