@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Sidebar from './components/Sidebar';
 import MatrixPromptEditor from './components/MatrixPromptEditor';
 import GlobalOpsPanel from './components/GlobalOpsPanel';
-import { DBTask, GlobalConfig, Shot, ScriptBreakdownResponse } from '@shared/types';
+import ProjectManager from './components/ProjectManager';
+import { DBTask, EpisodeSummary, GlobalConfig, ProjectSummary, Shot, ScriptBreakdownResponse } from '@shared/types';
 import {
   ensurePromptListLength,
   getGridCellCount,
@@ -10,7 +11,7 @@ import {
   normalizeIndexedList,
 } from '@shared/utils';
 import { DEFAULT_STYLE } from '@shared/constants';
-import { AlertCircle, BookOpenText, CheckCircle2, Cpu, Info, Keyboard, Moon, PanelLeft, PanelRight, Settings, Sun, X } from 'lucide-react';
+import { AlertCircle, BookOpenText, CheckCircle2, Cpu, FolderKanban, Info, Keyboard, Loader2, Moon, PanelLeft, PanelRight, Settings, Sun, X } from 'lucide-react';
 import { breakdownScript } from './services/geminiService';
 
 const STORAGE_KEYS = {
@@ -19,6 +20,9 @@ const STORAGE_KEYS = {
   BREAKDOWN: 'OMNI_DIRECTOR_BREAKDOWN',
   SELECTED_SHOT_ID: 'OMNI_DIRECTOR_SELECTED_ID',
   EPISODE_ID: 'OMNI_DIRECTOR_EPISODE_ID',
+  EPISODE_TITLE: 'OMNI_DIRECTOR_EPISODE_TITLE',
+  PROJECT_ID: 'OMNI_DIRECTOR_PROJECT_ID',
+  VIEW_MODE: 'OMNI_DIRECTOR_VIEW_MODE',
   ONBOARDING_DISMISSED: 'OMNI_DIRECTOR_ONBOARDING_DISMISSED',
   THEME_MODE: 'OMNI_DIRECTOR_THEME_MODE',
 };
@@ -27,6 +31,7 @@ type ApiStatus = 'connected' | 'error' | 'idle';
 type NoticeTone = 'success' | 'error' | 'info';
 type ScriptTemplate = { id: string; name: string; script: string };
 type ThemeMode = 'dark' | 'light';
+type ViewMode = 'project' | 'workspace';
 
 type UiNotice = {
   id: string;
@@ -195,6 +200,18 @@ const App: React.FC = () => {
     if (saved) return saved;
     return `ep_${Date.now()}`;
   });
+  const [episodeTitle, setEpisodeTitle] = useState(
+    () => localStorage.getItem(STORAGE_KEYS.EPISODE_TITLE) || '第 1 集',
+  );
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    () => localStorage.getItem(STORAGE_KEYS.PROJECT_ID) || null,
+  );
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.VIEW_MODE);
+    return saved === 'workspace' ? 'workspace' : 'project';
+  });
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [isRefreshingProjects, setIsRefreshingProjects] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingEpisode, setIsSavingEpisode] = useState(false);
@@ -222,7 +239,15 @@ const App: React.FC = () => {
   const isReloadingRef = useRef(false);
   const hasInitializedOnboardingRef = useRef(false);
   const noticeTimersRef = useRef<Map<string, number>>(new Map());
-  const persistTimers = useRef<{ config?: number; script?: number; breakdown?: number; selected?: number }>({});
+  const persistTimers = useRef<{
+    config?: number;
+    script?: number;
+    breakdown?: number;
+    selected?: number;
+    episodeTitle?: number;
+    projectId?: number;
+    viewMode?: number;
+  }>({});
 
   const shots = breakdown?.shots || [];
   const selectedShot = useMemo(
@@ -258,6 +283,22 @@ const App: React.FC = () => {
     [dismissNotice],
   );
 
+  const refreshProjects = useCallback(async () => {
+    if (!window.api?.app?.project?.list) return;
+    setIsRefreshingProjects(true);
+    try {
+      const data = await window.api.app.project.list();
+      setProjects(data);
+      if (!selectedProjectId && data.length > 0) {
+        setSelectedProjectId(data[0].projectId);
+      }
+    } catch (error: any) {
+      console.error('Failed to refresh projects', error);
+    } finally {
+      setIsRefreshingProjects(false);
+    }
+  }, [selectedProjectId]);
+
   const persistOnboardingDismissed = useCallback(() => {
     localStorage.setItem(STORAGE_KEYS.ONBOARDING_DISMISSED, '1');
   }, []);
@@ -280,6 +321,13 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (!isElectronRuntime) return;
+    refreshProjects().catch((error) => {
+      console.error('Initial project refresh failed', error);
+    });
+  }, [isElectronRuntime, refreshProjects]);
+
+  useEffect(() => {
     if (hasInitializedOnboardingRef.current) return;
     hasInitializedOnboardingRef.current = true;
     const dismissed = localStorage.getItem(STORAGE_KEYS.ONBOARDING_DISMISSED) === '1';
@@ -287,6 +335,13 @@ const App: React.FC = () => {
       setShowOnboarding(true);
     }
   }, [script, shots.length]);
+
+  useEffect(() => {
+    if (projects.length === 0) return;
+    if (!selectedProjectId || !projects.some((item) => item.projectId === selectedProjectId)) {
+      setSelectedProjectId(projects[0].projectId);
+    }
+  }, [projects, selectedProjectId]);
 
   useEffect(() => {
     const onResize = () => {
@@ -391,6 +446,43 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.EPISODE_ID, episodeId);
   }, [episodeId]);
+
+  useEffect(() => {
+    const timer = persistTimers.current.episodeTitle;
+    if (timer) window.clearTimeout(timer);
+    persistTimers.current.episodeTitle = window.setTimeout(() => {
+      localStorage.setItem(STORAGE_KEYS.EPISODE_TITLE, episodeTitle);
+    }, 200);
+    return () => {
+      const t = persistTimers.current.episodeTitle;
+      if (t) window.clearTimeout(t);
+    };
+  }, [episodeTitle]);
+
+  useEffect(() => {
+    const timer = persistTimers.current.projectId;
+    if (timer) window.clearTimeout(timer);
+    persistTimers.current.projectId = window.setTimeout(() => {
+      if (selectedProjectId) localStorage.setItem(STORAGE_KEYS.PROJECT_ID, selectedProjectId);
+      else localStorage.removeItem(STORAGE_KEYS.PROJECT_ID);
+    }, 200);
+    return () => {
+      const t = persistTimers.current.projectId;
+      if (t) window.clearTimeout(t);
+    };
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    const timer = persistTimers.current.viewMode;
+    if (timer) window.clearTimeout(timer);
+    persistTimers.current.viewMode = window.setTimeout(() => {
+      localStorage.setItem(STORAGE_KEYS.VIEW_MODE, viewMode);
+    }, 120);
+    return () => {
+      const t = persistTimers.current.viewMode;
+      if (t) window.clearTimeout(t);
+    };
+  }, [viewMode]);
 
   useEffect(() => {
     if (shots.length === 0) {
@@ -510,6 +602,16 @@ const App: React.FC = () => {
           shots: (result.shots || []).map((shot) => normalizeShotState(shot)),
         };
         setBreakdown(normalizedResult);
+        setViewMode('workspace');
+        if (!episodeTitle.trim() || /^第\s*\d+\s*集$/.test(episodeTitle.trim())) {
+          const inferredTitle =
+            normalizedResult.sceneTable?.[0]?.title ||
+            trimmed.split('\n').map((line) => line.trim()).find((line) => line.length > 0) ||
+            episodeTitle;
+          if (inferredTitle) {
+            setEpisodeTitle(inferredTitle.slice(0, 64));
+          }
+        }
         if (normalizedResult.shots.length > 0) {
           setSelectedShotId(normalizedResult.shots[0].id);
         }
@@ -524,7 +626,7 @@ const App: React.FC = () => {
         setIsLoading(false);
       }
     },
-    [config, pushNotice],
+    [config, episodeTitle, pushNotice],
   );
 
   const handleBreakdown = useCallback(async () => {
@@ -607,6 +709,13 @@ const App: React.FC = () => {
 
     const data = {
       episodeId,
+      projectId: selectedProjectId || undefined,
+      title: episodeTitle,
+      script,
+      context: breakdown?.context || '',
+      scriptOverview: breakdown?.scriptOverview,
+      sceneTable: breakdown?.sceneTable,
+      beatTable: breakdown?.beatTable,
       config,
       shots,
       assets: {
@@ -621,17 +730,19 @@ const App: React.FC = () => {
       await window.api.app.db.saveEpisode(data);
       pushNotice('success', `Episode ${episodeId} 已保存。`);
       setApiStatus('connected');
+      refreshProjects().catch(() => {});
     } catch (error: any) {
       pushNotice('error', `保存失败：${error?.message || error}`);
       setApiStatus('error');
     } finally {
       setIsSavingEpisode(false);
     }
-  }, [config, episodeId, isSavingEpisode, pushNotice, shots]);
+  }, [breakdown, config, episodeId, episodeTitle, isSavingEpisode, pushNotice, refreshProjects, script, selectedProjectId, shots]);
 
   const reloadEpisode = useCallback(
-    async (options?: { notify?: boolean; markBusy?: boolean }) => {
-      const { notify = false, markBusy = false } = options || {};
+    async (options?: { notify?: boolean; markBusy?: boolean; episodeId?: string }) => {
+      const { notify = false, markBusy = false, episodeId: explicitEpisodeId } = options || {};
+      const targetEpisodeId = explicitEpisodeId || episodeId;
 
       if (!window.api?.app?.db) {
         if (notify) pushNotice('error', '数据库读写仅在 Electron 桌面端可用。');
@@ -643,21 +754,29 @@ const App: React.FC = () => {
       }
 
       try {
-        const data = await window.api.app.db.loadEpisode(episodeId);
+        const data = await window.api.app.db.loadEpisode(targetEpisodeId);
         if (!data) {
-          if (notify) pushNotice('info', `未找到 Episode：${episodeId}`);
+          if (notify) pushNotice('info', `未找到 Episode：${targetEpisodeId}`);
           return;
         }
         const normalizedShots = data.shots.map((shot) => normalizeShotState(shot));
         setConfig(data.config);
+        setEpisodeId(data.episodeId);
+        setEpisodeTitle(data.title || `第 ${data.episodeNo || 1} 集`);
+        setScript(data.script || '');
+        setSelectedProjectId(data.projectId || selectedProjectId);
         setBreakdown({
-          context: '',
+          context: data.context || '',
+          scriptOverview: data.scriptOverview,
+          sceneTable: data.sceneTable,
+          beatTable: data.beatTable,
           shots: normalizedShots,
           characters: data.assets.characters.map((c) => ({ name: c.name, description: c.description })),
         });
         setSelectedShotId(normalizedShots[0]?.id || null);
+        setViewMode('workspace');
         setApiStatus('connected');
-        if (notify) pushNotice('success', `Episode ${episodeId} 已加载。`);
+        if (notify) pushNotice('success', `Episode ${data.episodeId} 已加载。`);
       } catch (error: any) {
         if (notify) pushNotice('error', `读取失败：${error?.message || error}`);
         setApiStatus('error');
@@ -667,12 +786,63 @@ const App: React.FC = () => {
         }
       }
     },
-    [episodeId, pushNotice],
+    [episodeId, pushNotice, selectedProjectId],
   );
 
   const handleLoadEpisode = useCallback(async () => {
     await reloadEpisode({ notify: true, markBusy: true });
-  }, [reloadEpisode]);
+    refreshProjects().catch(() => {});
+  }, [refreshProjects, reloadEpisode]);
+
+  const handleCreateProject = useCallback(
+    async (name: string, description?: string) => {
+      if (!window.api?.app?.project?.create) {
+        pushNotice('error', '项目管理仅在 Electron 桌面端可用。');
+        return;
+      }
+      try {
+        const created = await window.api.app.project.create({ name, description });
+        setSelectedProjectId(created.projectId);
+        await refreshProjects();
+        pushNotice('success', `项目「${created.name}」已创建。`);
+      } catch (error: any) {
+        pushNotice('error', `创建项目失败：${error?.message || error}`);
+      }
+    },
+    [pushNotice, refreshProjects],
+  );
+
+  const handleCreateEpisode = useCallback(
+    async (projectId: string, title?: string) => {
+      if (!window.api?.app?.project?.createEpisode) {
+        pushNotice('error', '项目管理仅在 Electron 桌面端可用。');
+        return;
+      }
+      try {
+        const created = await window.api.app.project.createEpisode({ projectId, title });
+        setSelectedProjectId(created.projectId);
+        setEpisodeId(created.episodeId);
+        setEpisodeTitle(created.title);
+        setScript('');
+        setBreakdown(null);
+        setSelectedShotId(null);
+        await refreshProjects();
+        pushNotice('success', `已创建单集：${created.title}`);
+      } catch (error: any) {
+        pushNotice('error', `创建单集失败：${error?.message || error}`);
+      }
+    },
+    [pushNotice, refreshProjects],
+  );
+
+  const handleOpenEpisodeFromProject = useCallback(
+    async (episode: EpisodeSummary) => {
+      setSelectedProjectId(episode.projectId);
+      setViewMode('workspace');
+      await reloadEpisode({ notify: true, markBusy: true, episodeId: episode.episodeId });
+    },
+    [reloadEpisode],
+  );
 
   useEffect(() => {
     const taskApi = window.api?.app?.task;
@@ -684,6 +854,7 @@ const App: React.FC = () => {
       if (isReloadingRef.current) return;
       isReloadingRef.current = true;
       reloadEpisode()
+        .then(() => refreshProjects())
         .catch((err) => console.error('Episode reload failed', err))
         .finally(() => {
           isReloadingRef.current = false;
@@ -692,7 +863,7 @@ const App: React.FC = () => {
 
     taskApi.onUpdate(handleUpdate);
     return () => taskApi.offUpdate(handleUpdate);
-  }, [episodeId, reloadEpisode]);
+  }, [episodeId, refreshProjects, reloadEpisode]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -734,6 +905,7 @@ const App: React.FC = () => {
   const quickStartDisabledReason = !isElectronRuntime
     ? '一键跑通依赖 AI 拆解能力，仅在 Electron 桌面端可用。'
     : '';
+  const isProjectMode = viewMode === 'project';
 
   const sidebarNode = (
     <Sidebar
@@ -749,6 +921,9 @@ const App: React.FC = () => {
       script={script}
       setScript={setScript}
       handleBreakdown={handleBreakdown}
+      scriptOverview={breakdown?.scriptOverview}
+      sceneTable={breakdown?.sceneTable}
+      beatTable={breakdown?.beatTable}
       episodeId={episodeId}
       isElectronRuntime={isElectronRuntime}
       notify={pushNotice}
@@ -773,12 +948,24 @@ const App: React.FC = () => {
     />
   );
 
+  const projectNode = (
+    <ProjectManager
+      projects={projects}
+      selectedProjectId={selectedProjectId}
+      isElectronRuntime={isElectronRuntime}
+      onSelectProject={(projectId) => setSelectedProjectId(projectId)}
+      onCreateProject={handleCreateProject}
+      onCreateEpisode={handleCreateEpisode}
+      onOpenEpisode={handleOpenEpisodeFromProject}
+    />
+  );
+
   return (
     <div
       data-theme-mode={themeMode}
       className="relative flex h-screen w-full overflow-hidden bg-[#0f1115] text-slate-300 font-sans"
     >
-      {isWideLayout ? sidebarNode : null}
+      {isWideLayout && !isProjectMode ? sidebarNode : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
         {!isElectronRuntime && (
@@ -794,7 +981,7 @@ const App: React.FC = () => {
 
         <header className="border-b border-white/10 bg-[#16191f]/80 px-4 py-2 sm:px-6 backdrop-blur-md flex flex-wrap items-center gap-3 justify-between">
           <div className="flex min-w-0 items-center gap-2 sm:gap-4">
-            {!isWideLayout && (
+            {!isWideLayout && !isProjectMode && (
               <button
                 onClick={() => {
                   setShowRightDrawer(false);
@@ -814,12 +1001,14 @@ const App: React.FC = () => {
               <h1 className="text-sm font-black text-white tracking-wide uppercase truncate">
                 Omni Director <span className="text-indigo-500">v5.0</span>
               </h1>
-              <span className="text-[9px] text-slate-500 tracking-wider">预演工作站</span>
+              <span className="text-[9px] text-slate-500 tracking-wider">
+                {isProjectMode ? '项目管理' : `预演工作站 · ${episodeTitle}`}
+              </span>
             </div>
           </div>
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-            {!isWideLayout && (
+            {!isWideLayout && !isProjectMode && (
               <button
                 onClick={() => {
                   setShowLeftDrawer(false);
@@ -832,6 +1021,19 @@ const App: React.FC = () => {
                 任务
               </button>
             )}
+
+            <button
+              onClick={() => setViewMode((prev) => (prev === 'project' ? 'workspace' : 'project'))}
+              className={`h-8 px-2 rounded-lg border text-[10px] font-black tracking-wide flex items-center gap-1.5 ${
+                isProjectMode
+                  ? 'border-indigo-400/40 bg-indigo-500/20 text-indigo-100'
+                  : 'border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10'
+              }`}
+              title={isProjectMode ? '返回单集创作页面' : '打开项目管理页面'}
+            >
+              {isRefreshingProjects ? <Loader2 size={14} className="animate-spin" /> : <FolderKanban size={14} />}
+              项目
+            </button>
 
             <button
               onClick={() => setThemeMode((prev) => (prev === 'dark' ? 'light' : 'dark'))}
@@ -877,7 +1079,9 @@ const App: React.FC = () => {
         </header>
 
         <main className="flex-1 min-w-0 overflow-hidden">
-          {selectedShot ? (
+          {isProjectMode ? (
+            projectNode
+          ) : selectedShot ? (
             <MatrixPromptEditor
               shot={selectedShot}
               allShots={shots}
@@ -971,9 +1175,9 @@ const App: React.FC = () => {
         </main>
       </div>
 
-      {isWideLayout ? globalOpsNode : null}
+      {isWideLayout && !isProjectMode ? globalOpsNode : null}
 
-      {!isWideLayout && showLeftDrawer && (
+      {!isWideLayout && !isProjectMode && showLeftDrawer && (
         <div className="fixed inset-0 z-[250] flex">
           <button
             aria-label="关闭左侧面板"
@@ -984,7 +1188,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {!isWideLayout && showRightDrawer && (
+      {!isWideLayout && !isProjectMode && showRightDrawer && (
         <div className="fixed inset-0 z-[250] flex justify-end">
           <button
             aria-label="关闭右侧面板"

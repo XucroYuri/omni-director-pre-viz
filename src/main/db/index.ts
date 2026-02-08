@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import { app } from 'electron';
 import Database = require('better-sqlite3');
 
-const SCHEMA_VERSION = '1.0.0';
+const SCHEMA_VERSION = '1.1.0';
 
 let dbInstance: Database.Database | null = null;
 
@@ -16,15 +16,28 @@ CREATE TABLE IF NOT EXISTS meta (
   value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS episodes (
   id TEXT PRIMARY KEY,
+  project_id TEXT,
+  episode_no INTEGER NOT NULL DEFAULT 1,
   title TEXT,
   script TEXT,
   context TEXT,
+  script_overview TEXT,
+  analysis_json TEXT,
   config_json TEXT NOT NULL,
   tags_json TEXT,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS shots (
@@ -91,6 +104,24 @@ CREATE INDEX IF NOT EXISTS idx_tasks_episode ON tasks(episode_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_shot ON tasks(shot_id);
 `;
 
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.some((row) => row.name === column);
+}
+
+function ensureColumn(db: Database.Database, table: string, column: string, ddl: string) {
+  if (hasColumn(db, table, column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+}
+
+function runMigrations(db: Database.Database) {
+  ensureColumn(db, 'episodes', 'project_id', 'TEXT');
+  ensureColumn(db, 'episodes', 'episode_no', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn(db, 'episodes', 'script_overview', 'TEXT');
+  ensureColumn(db, 'episodes', 'analysis_json', 'TEXT');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_episodes_project ON episodes(project_id)');
+}
+
 export function initDatabase(): Database.Database {
   if (dbInstance) return dbInstance;
 
@@ -99,8 +130,9 @@ export function initDatabase(): Database.Database {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(DDL);
+  runMigrations(db);
 
-  db.prepare('INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)').run('schema_version', SCHEMA_VERSION);
+  db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)').run('schema_version', SCHEMA_VERSION);
 
   dbInstance = db;
   return dbInstance;

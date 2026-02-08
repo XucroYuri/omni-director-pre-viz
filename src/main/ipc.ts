@@ -71,6 +71,11 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle(IPC_CHANNELS.app.exportEpisode, async (_evt, options) => exportEpisode(options));
+  ipcMain.handle(IPC_CHANNELS.app.project.list, async () => dbService.listProjects());
+  ipcMain.handle(IPC_CHANNELS.app.project.create, async (_evt, input) => dbService.createProject(input));
+  ipcMain.handle(IPC_CHANNELS.app.project.createEpisode, async (_evt, input) =>
+    dbService.createEpisodeForProject(input),
+  );
   ipcMain.handle(IPC_CHANNELS.app.media.putBytes, async (_evt, input) => {
     const bytes = input?.bytes as Uint8Array | undefined;
     const mimeType = input?.mimeType as string | undefined;

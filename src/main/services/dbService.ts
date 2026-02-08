@@ -1,11 +1,21 @@
 import { app } from 'electron';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { episodeRepo, type DBEpisode } from '../db/repos/episodeRepo';
+import { projectRepo, type DBProject } from '../db/repos/projectRepo';
 import { shotRepo, type DBShot } from '../db/repos/shotRepo';
 import { assetRepo, type DBAsset } from '../db/repos/assetRepo';
-import type { EpisodeData, Shot, Character, Scene, Prop, ShotHistoryItem } from '../../shared/types';
+import type {
+  EpisodeData,
+  EpisodeSummary,
+  ProjectSummary,
+  Shot,
+  Character,
+  Scene,
+  Prop,
+  ShotHistoryItem,
+} from '../../shared/types';
 import {
   ensurePromptListLength,
   getGridCellCount,
@@ -15,6 +25,9 @@ import {
   serializeMatrixPromptPayload,
 } from '../../shared/utils';
 import { keyFromPath, resolveUrlToPath, urlFromPath, readFileAsDataUri } from './mediaService';
+
+const DEFAULT_PROJECT_ID = 'project_default';
+const DEFAULT_PROJECT_NAME = '默认项目';
 
 // Helper to parse JSON safely
 function parseJson<T>(jsonStr: string | null, fallback: T): T {
@@ -187,6 +200,123 @@ async function hydrateHistoryEntries(
 export const dbService = {
   // --- Episode Operations ---
 
+  ensureDefaultProject(): DBProject {
+    const existing = projectRepo.get(DEFAULT_PROJECT_ID);
+    if (existing) return existing;
+    const now = Date.now();
+    const created: DBProject = {
+      id: DEFAULT_PROJECT_ID,
+      name: DEFAULT_PROJECT_NAME,
+      description: '自动创建的默认项目',
+      created_at: now,
+      updated_at: now,
+    };
+    projectRepo.create(created);
+    return created;
+  },
+
+  listProjects(): ProjectSummary[] {
+    const defaultProject = this.ensureDefaultProject();
+    const allProjects = projectRepo.getAll();
+    const projectMap = new Map<string, DBProject>();
+    for (const project of allProjects) {
+      projectMap.set(project.id, project);
+    }
+    if (!projectMap.has(defaultProject.id)) {
+      projectMap.set(defaultProject.id, defaultProject);
+    }
+
+    const episodes = episodeRepo.getAll();
+    const episodesByProject = new Map<string, EpisodeSummary[]>();
+    for (const ep of episodes) {
+      const projectId = ep.project_id || defaultProject.id;
+      if (!projectMap.has(projectId)) continue;
+      const shots = shotRepo.getByEpisodeId(ep.id);
+      const summary: EpisodeSummary = {
+        episodeId: ep.id,
+        projectId,
+        episodeNo: ep.episode_no || 1,
+        title: ep.title || `第 ${ep.episode_no || 1} 集`,
+        updatedAt: ep.updated_at,
+        shotCount: shots.length,
+      };
+      const list = episodesByProject.get(projectId) || [];
+      list.push(summary);
+      episodesByProject.set(projectId, list);
+    }
+
+    const projects: ProjectSummary[] = Array.from(projectMap.values()).map((project) => {
+      const episodesInProject = (episodesByProject.get(project.id) || []).sort((a, b) =>
+        a.episodeNo === b.episodeNo ? b.updatedAt - a.updatedAt : a.episodeNo - b.episodeNo,
+      );
+      return {
+        projectId: project.id,
+        name: project.name,
+        description: project.description || undefined,
+        updatedAt: project.updated_at,
+        episodes: episodesInProject,
+      };
+    });
+
+    return projects.sort((a, b) => b.updatedAt - a.updatedAt);
+  },
+
+  createProject(input: { name: string; description?: string }): ProjectSummary {
+    const now = Date.now();
+    const id = `prj_${randomUUID()}`;
+    const project: DBProject = {
+      id,
+      name: input.name.trim() || '未命名项目',
+      description: input.description?.trim() || null,
+      created_at: now,
+      updated_at: now,
+    };
+    projectRepo.create(project);
+    return {
+      projectId: project.id,
+      name: project.name,
+      description: project.description || undefined,
+      updatedAt: project.updated_at,
+      episodes: [],
+    };
+  },
+
+  createEpisodeForProject(input: { projectId: string; title?: string }): EpisodeSummary {
+    const now = Date.now();
+    const project = projectRepo.get(input.projectId) || this.ensureDefaultProject();
+    const episodeNo = episodeRepo.getNextEpisodeNo(project.id);
+    const episodeId = `ep_${randomUUID()}`;
+    const title = input.title?.trim() || `第 ${episodeNo} 集`;
+    const episode: DBEpisode = {
+      id: episodeId,
+      project_id: project.id,
+      episode_no: episodeNo,
+      title,
+      script: '',
+      context: '',
+      script_overview: '',
+      analysis_json: stringifyJson({ sceneTable: [], beatTable: [] }),
+      config_json: stringifyJson({
+        artStyle: '',
+        aspectRatio: '16:9',
+        resolution: '2K',
+        apiProvider: 'aihubmix',
+      }),
+      tags_json: null,
+      created_at: now,
+      updated_at: now,
+    };
+    episodeRepo.create(episode);
+    return {
+      episodeId: episode.id,
+      projectId: project.id,
+      episodeNo: episode.episode_no,
+      title: episode.title || `第 ${episode.episode_no} 集`,
+      updatedAt: episode.updated_at,
+      shotCount: 0,
+    };
+  },
+
   async saveEpisodeFull(data: EpisodeData): Promise<void> {
     const now = Date.now();
 
@@ -198,19 +328,34 @@ export const dbService = {
       apiProvider: data.config.apiProvider,
     };
 
+    this.ensureDefaultProject();
+
+    const existing = episodeRepo.get(data.episodeId);
+    const resolvedProjectId = data.projectId || existing?.project_id || DEFAULT_PROJECT_ID;
+    const project = projectRepo.get(resolvedProjectId) || this.ensureDefaultProject();
+    const resolvedEpisodeNo = data.episodeNo || existing?.episode_no || episodeRepo.getNextEpisodeNo(project.id);
+    const resolvedTitle = data.title?.trim() || existing?.title || `第 ${resolvedEpisodeNo} 集`;
+    const analysisPayload = {
+      sceneTable: data.sceneTable || parseJson(existing?.analysis_json || null, { sceneTable: [] }).sceneTable || [],
+      beatTable: data.beatTable || parseJson(existing?.analysis_json || null, { beatTable: [] }).beatTable || [],
+    };
+
     const episode: DBEpisode = {
       id: data.episodeId,
-      title: 'Untitled Episode', // Todo: Add title field in frontend
-      script: null,
-      context: null,
+      project_id: project.id,
+      episode_no: resolvedEpisodeNo,
+      title: resolvedTitle,
+      script: data.script ?? existing?.script ?? null,
+      context: data.context ?? existing?.context ?? null,
+      script_overview: data.scriptOverview ?? existing?.script_overview ?? null,
+      analysis_json: stringifyJson(analysisPayload),
       config_json: stringifyJson(baseConfig),
-      tags_json: null,
-      created_at: now, // Should query existing created_at if update, but simplified for now
+      tags_json: existing?.tags_json || null,
+      created_at: now,
       updated_at: now,
     };
     
     // Check if exists to preserve created_at
-    const existing = episodeRepo.get(data.episodeId);
     if (existing) {
       episode.created_at = existing.created_at;
       episodeRepo.update(episode);
@@ -414,6 +559,14 @@ export const dbService = {
 
     return {
       episodeId: ep.id,
+      projectId: ep.project_id || DEFAULT_PROJECT_ID,
+      episodeNo: ep.episode_no || 1,
+      title: ep.title || `第 ${ep.episode_no || 1} 集`,
+      script: ep.script || '',
+      context: ep.context || '',
+      scriptOverview: ep.script_overview || '',
+      sceneTable: parseJson(ep.analysis_json, { sceneTable: [], beatTable: [] }).sceneTable || [],
+      beatTable: parseJson(ep.analysis_json, { sceneTable: [], beatTable: [] }).beatTable || [],
       config: {
         ...parseJson(ep.config_json, {
           artStyle: '',

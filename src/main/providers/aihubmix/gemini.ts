@@ -2,7 +2,15 @@ import { GoogleGenAI, Type } from '@google/genai';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { GlobalConfig, Shot } from '../../../shared/types';
+import type {
+  BeatTableItem,
+  GlobalConfig,
+  SceneTableItem,
+  ScriptAssetExtraction,
+  ScriptBreakdownResponse,
+  Shot,
+  ShotScriptMapping,
+} from '../../../shared/types';
 import {
   buildAssetInjection,
   ensurePromptListLength,
@@ -55,6 +63,159 @@ function safeJsonParse(text: string): Json | null {
   }
 }
 
+const MAX_SCRIPT_CHARS_FOR_ASSET_EXTRACTION = 32000;
+const MAX_BEATS_PER_CHUNK = 6;
+
+function splitScriptLines(script: string): string[] {
+  return script
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/\t/g, '  ').trimEnd());
+}
+
+function isSceneHeading(line: string): boolean {
+  const value = line.trim();
+  if (!value) return false;
+  return /^(INT\.?|EXT\.?|INT\/EXT\.?|I\/E\.?|内景|外景|内\/外景|内外景)/i.test(value);
+}
+
+function isTransitionLine(line: string): boolean {
+  const value = line.trim();
+  if (!value) return false;
+  return /(?:CUT TO|FADE IN|FADE OUT|DISSOLVE TO|SMASH CUT|MATCH CUT|转场|切到|切至|镜头切换)/i.test(value);
+}
+
+function sceneLocationType(line: string): SceneTableItem['locationType'] {
+  const value = line.trim().toUpperCase();
+  if (/INT\/EXT|I\/E|内\/外景|内外景/.test(value)) return 'INT/EXT';
+  if (/^INT|内景/.test(value)) return 'INT';
+  if (/^EXT|外景/.test(value)) return 'EXT';
+  return 'UNKNOWN';
+}
+
+function summarizeLine(line: string, max = 64): string {
+  const value = line.trim();
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
+
+function buildSceneTable(lines: string[]): SceneTableItem[] {
+  const headingIndexes: number[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (isSceneHeading(lines[index])) {
+      headingIndexes.push(index);
+    }
+  }
+
+  if (headingIndexes.length === 0) {
+    const firstLine = lines.find((line) => line.trim()) || '';
+    const lastLine = [...lines].reverse().find((line) => line.trim()) || firstLine;
+    return [
+      {
+        id: 'SC_01',
+        title: summarizeLine(firstLine || '未显式场景标题'),
+        locationType: sceneLocationType(firstLine),
+        startLine: 1,
+        endLine: Math.max(1, lines.length),
+        startLineText: firstLine || '',
+        endLineText: lastLine || firstLine || '',
+      },
+    ];
+  }
+
+  return headingIndexes.map((headingIndex, sceneIndex) => {
+    const startLine = headingIndex + 1;
+    const endLine =
+      sceneIndex + 1 < headingIndexes.length ? headingIndexes[sceneIndex + 1] : Math.max(1, lines.length);
+    const endLineText =
+      lines[Math.max(startLine - 1, endLine - 1)] && lines[endLine - 1]?.trim()
+        ? lines[endLine - 1]
+        : lines.slice(startLine - 1, endLine).reverse().find((line) => line.trim()) || lines[headingIndex];
+    const title = summarizeLine(lines[headingIndex] || `Scene ${sceneIndex + 1}`);
+    return {
+      id: `SC_${String(sceneIndex + 1).padStart(2, '0')}`,
+      title,
+      locationType: sceneLocationType(lines[headingIndex]),
+      startLine,
+      endLine: Math.max(startLine, endLine),
+      startLineText: lines[headingIndex] || '',
+      endLineText: endLineText || lines[headingIndex] || '',
+    };
+  });
+}
+
+function buildBeatTable(lines: string[], scenes: SceneTableItem[]): BeatTableItem[] {
+  const beats: BeatTableItem[] = [];
+
+  const pushBeat = (scene: SceneTableItem, startLine: number, endLine: number) => {
+    const contentLines = lines.slice(Math.max(0, startLine - 1), Math.max(startLine, endLine));
+    const firstContent = contentLines.find((line) => line.trim()) || scene.startLineText;
+    const lastContent = [...contentLines].reverse().find((line) => line.trim()) || firstContent;
+    if (!firstContent.trim()) return;
+    const beatIndex = beats.length + 1;
+    beats.push({
+      id: `BT_${String(beatIndex).padStart(3, '0')}`,
+      sceneId: scene.id,
+      summary: summarizeLine(firstContent, 80),
+      startLine,
+      endLine,
+      startLineText: firstContent,
+      endLineText: lastContent,
+    });
+  };
+
+  for (const scene of scenes) {
+    const start = Math.max(1, scene.startLine);
+    const end = Math.max(start, scene.endLine);
+
+    let beatStart = start;
+    let nonEmptyCursor = start;
+    let lastWasBlank = false;
+
+    for (let lineNo = start; lineNo <= end; lineNo += 1) {
+      const text = lines[lineNo - 1] || '';
+      const isBlank = !text.trim();
+      if (!isBlank) {
+        nonEmptyCursor = lineNo;
+      }
+
+      const shouldCut = isTransitionLine(text) || (isBlank && lastWasBlank && lineNo - beatStart >= 4);
+      if (shouldCut && nonEmptyCursor >= beatStart) {
+        pushBeat(scene, beatStart, nonEmptyCursor);
+        beatStart = lineNo + 1;
+      }
+      lastWasBlank = isBlank;
+    }
+
+    if (beatStart <= end) {
+      pushBeat(scene, beatStart, Math.max(beatStart, nonEmptyCursor, end));
+    }
+  }
+
+  if (beats.length === 0 && scenes.length > 0) {
+    const firstScene = scenes[0];
+    beats.push({
+      id: 'BT_001',
+      sceneId: firstScene.id,
+      summary: summarizeLine(firstScene.startLineText || '节拍'),
+      startLine: firstScene.startLine,
+      endLine: firstScene.endLine,
+      startLineText: firstScene.startLineText,
+      endLineText: firstScene.endLineText,
+    });
+  }
+
+  return beats;
+}
+
+function chunkBeats(beats: BeatTableItem[]): BeatTableItem[][] {
+  const chunks: BeatTableItem[][] = [];
+  for (let index = 0; index < beats.length; index += MAX_BEATS_PER_CHUNK) {
+    chunks.push(beats.slice(index, index + MAX_BEATS_PER_CHUNK));
+  }
+  return chunks;
+}
+
 function parseDataUri(dataUri: string) {
   const match = dataUri.match(/^data:([^;]+);base64,(.+)$/);
   if (!match) throw new Error('Invalid data URI');
@@ -70,32 +231,84 @@ function validateShotConsistency(shot: Shot, config: GlobalConfig) {
   }
 }
 
-export async function breakdownScript(script: string, config: GlobalConfig) {
-  const ai = getClient();
-  const response = await ai.models.generateContent({
-    model: TEXT_MODEL,
-    contents: script,
+function normalizeShotKind(value: unknown): Shot['shotKind'] {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (normalized === 'CHAR') return 'CHAR';
+  if (normalized === 'ENV') return 'ENV';
+  if (normalized === 'POV') return 'POV';
+  if (normalized === 'INSERT') return 'INSERT';
+  return 'MIXED';
+}
+
+function extractLineWindow(lines: string[], startLine: number, endLine: number, maxLines = 18): string {
+  const safeStart = Math.max(1, startLine);
+  const safeEnd = Math.max(safeStart, endLine);
+  const full = lines.slice(safeStart - 1, safeEnd);
+  const windowed = full.length > maxLines ? full.slice(0, maxLines) : full;
+  return windowed.map((line, offset) => `${safeStart + offset}. ${line}`).join('\n');
+}
+
+async function generateScriptOverview(
+  ai: GoogleGenAI,
+  script: string,
+  scenes: SceneTableItem[],
+  beats: BeatTableItem[],
+): Promise<{ context: string; scriptOverview: string }> {
+  const overviewResponse = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: [
+      '任务1：快速通读并生成单集剧情概述（不超过220字）。',
+      '任务2：总结主要冲突线索（3-6条）。',
+      '任务3：总结影像制作关注点（3-6条，包含场景调度/情绪/节奏）。',
+      `场景总数：${scenes.length}，节拍总数：${beats.length}`,
+      '请务必仅基于原文，不得杜撰剧情。',
+      script,
+    ].join('\n\n'),
     config: {
-      systemInstruction: SYSTEM_INSTRUCTION_BREAKDOWN,
-      thinkingConfig: { thinkingBudget: 1024 },
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,
         properties: {
           context: { type: Type.STRING },
-          shots: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING },
-                originalText: { type: Type.STRING },
-                visualTranslation: { type: Type.STRING },
-                contextTag: { type: Type.STRING },
-              },
-              required: ['id', 'originalText', 'visualTranslation', 'contextTag'],
-            },
-          },
+          overview: { type: Type.STRING },
+          storyAxes: { type: Type.ARRAY, items: { type: Type.STRING } },
+          productionNotes: { type: Type.ARRAY, items: { type: Type.STRING } },
+        },
+        required: ['context', 'overview', 'storyAxes', 'productionNotes'],
+      },
+    },
+  });
+  const parsed = (safeJsonParse(overviewResponse.text || '{}') as any) || {};
+  const context = String(parsed.context || '').trim();
+  const overview = String(parsed.overview || '').trim();
+  const storyAxes = Array.isArray(parsed.storyAxes) ? parsed.storyAxes.map((item: unknown) => String(item || '').trim()) : [];
+  const productionNotes = Array.isArray(parsed.productionNotes)
+    ? parsed.productionNotes.map((item: unknown) => String(item || '').trim())
+    : [];
+  const scriptOverview = [overview, `冲突线索：${storyAxes.filter(Boolean).join(' / ')}`, `制作关注：${productionNotes.filter(Boolean).join(' / ')}`]
+    .filter(Boolean)
+    .join('\n');
+
+  return {
+    context: context || overview || '剧本拆解上下文',
+    scriptOverview: scriptOverview || overview || context || '',
+  };
+}
+
+async function extractScriptAssets(ai: GoogleGenAI, script: string): Promise<ScriptAssetExtraction> {
+  const response = await ai.models.generateContent({
+    model: TEXT_MODEL,
+    contents: [
+      '仅基于输入剧本提取角色、场景、道具三类视觉描述候选。',
+      '禁止杜撰人物关系、外观、材质、时代背景。',
+      '每条描述使用原文可证据化信息，不足时明确写“剧本未明确描述”。',
+      script.slice(0, MAX_SCRIPT_CHARS_FOR_ASSET_EXTRACTION),
+    ].join('\n\n'),
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
           characters: {
             type: Type.ARRAY,
             items: {
@@ -107,33 +320,254 @@ export async function breakdownScript(script: string, config: GlobalConfig) {
               required: ['name', 'description'],
             },
           },
+          scenes: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                description: { type: Type.STRING },
+              },
+              required: ['name', 'description'],
+            },
+          },
+          props: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                description: { type: Type.STRING },
+              },
+              required: ['name', 'description'],
+            },
+          },
         },
-        required: ['context', 'shots', 'characters'],
+        required: ['characters', 'scenes', 'props'],
       },
     },
   });
 
-  const result = safeJsonParse(response.text || '{}') || {};
-  const shots = Array.isArray((result as any).shots) ? (result as any).shots : [];
+  const parsed = (safeJsonParse(response.text || '{}') as any) || {};
   return {
-    context: (result as any).context || '',
-    shots: shots.map((s: any) => {
-      const gridLayout = normalizeGridLayout();
-      const cellCount = getGridCellCount(gridLayout);
+    characters: Array.isArray(parsed.characters)
+      ? parsed.characters.map((item: any) => ({ name: String(item?.name || '').trim(), description: String(item?.description || '').trim() })).filter((item: any) => item.name)
+      : [],
+    scenes: Array.isArray(parsed.scenes)
+      ? parsed.scenes.map((item: any) => ({ name: String(item?.name || '').trim(), description: String(item?.description || '').trim() })).filter((item: any) => item.name)
+      : [],
+    props: Array.isArray(parsed.props)
+      ? parsed.props.map((item: any) => ({ name: String(item?.name || '').trim(), description: String(item?.description || '').trim() })).filter((item: any) => item.name)
+      : [],
+  };
+}
+
+async function breakdownShotsForBeatChunk(
+  ai: GoogleGenAI,
+  params: {
+    scriptLines: string[];
+    scriptOverview: string;
+    scenes: SceneTableItem[];
+    beats: BeatTableItem[];
+  },
+): Promise<Array<{
+  beatId: string;
+  originalText: string;
+  visualTranslation: string;
+  contextTag: string;
+  shotKind: Shot['shotKind'];
+  scriptMapping: ShotScriptMapping;
+}>> {
+  const beatsPrompt = params.beats
+    .map((beat) => {
+      const scene = params.scenes.find((item) => item.id === beat.sceneId);
+      return [
+        `BeatId: ${beat.id}`,
+        `Scene: ${scene?.title || beat.sceneId}`,
+        `LineRange: ${beat.startLine}-${beat.endLine}`,
+        `LineStart: ${beat.startLineText}`,
+        `LineEnd: ${beat.endLineText}`,
+        'Excerpt:',
+        extractLineWindow(params.scriptLines, beat.startLine, beat.endLine),
+      ].join('\n');
+    })
+    .join('\n\n---\n\n');
+
+  const response = await ai.models.generateContent({
+    model: TEXT_MODEL,
+    contents: [
+      '你是影视分镜导演，请将每个 Beat 拆成 1~3 个镜头组（shots）。',
+      '必须返回 JSON 数组，每个元素都必须包含 beatId, originalText, visualTranslation, contextTag, shotKind。',
+      'shotKind 仅允许 CHAR / ENV / POV / INSERT / MIXED。',
+      '并补充脚本映射字段：sceneHeading/action/characters/dialogue/parenthetical/transition/sfx/bgm/vfx/sourceStartLine/sourceEndLine。',
+      '所有内容必须由输入节拍原文支持，禁止杜撰。',
+      `全局压缩上下文:\n${params.scriptOverview}`,
+      beatsPrompt,
+    ].join('\n\n'),
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            beatId: { type: Type.STRING },
+            originalText: { type: Type.STRING },
+            visualTranslation: { type: Type.STRING },
+            contextTag: { type: Type.STRING },
+            shotKind: { type: Type.STRING },
+            sceneHeading: { type: Type.STRING },
+            action: { type: Type.STRING },
+            characters: { type: Type.ARRAY, items: { type: Type.STRING } },
+            dialogue: { type: Type.ARRAY, items: { type: Type.STRING } },
+            parenthetical: { type: Type.ARRAY, items: { type: Type.STRING } },
+            transition: { type: Type.STRING },
+            sfx: { type: Type.ARRAY, items: { type: Type.STRING } },
+            bgm: { type: Type.ARRAY, items: { type: Type.STRING } },
+            vfx: { type: Type.ARRAY, items: { type: Type.STRING } },
+            sourceStartLine: { type: Type.NUMBER },
+            sourceEndLine: { type: Type.NUMBER },
+          },
+          required: ['beatId', 'originalText', 'visualTranslation', 'contextTag', 'shotKind'],
+        },
+      },
+    },
+  });
+
+  const parsed = safeJsonParse(response.text || '[]');
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .map((item) => {
+      const row = item as Record<string, unknown>;
       return {
-        ...s,
-        gridLayout,
-        matrixPrompts: Array(cellCount).fill(''),
-        status: 'pending',
-        progress: 0,
-        characterIds: [],
-        sceneIds: [],
-        propIds: [],
-        videoUrls: Array(cellCount).fill(null),
-        videoStatus: Array(cellCount).fill('idle'),
+        beatId: String(row.beatId || '').trim(),
+        originalText: String(row.originalText || '').trim(),
+        visualTranslation: String(row.visualTranslation || '').trim(),
+        contextTag: String(row.contextTag || '').trim(),
+        shotKind: normalizeShotKind(row.shotKind),
+        scriptMapping: {
+          sceneHeading: String(row.sceneHeading || '').trim(),
+          action: String(row.action || '').trim(),
+          characters: Array.isArray(row.characters) ? row.characters.map((v) => String(v || '').trim()).filter(Boolean) : [],
+          dialogue: Array.isArray(row.dialogue) ? row.dialogue.map((v) => String(v || '').trim()).filter(Boolean) : [],
+          parenthetical: Array.isArray(row.parenthetical)
+            ? row.parenthetical.map((v) => String(v || '').trim()).filter(Boolean)
+            : [],
+          transition: String(row.transition || '').trim(),
+          sfx: Array.isArray(row.sfx) ? row.sfx.map((v) => String(v || '').trim()).filter(Boolean) : [],
+          bgm: Array.isArray(row.bgm) ? row.bgm.map((v) => String(v || '').trim()).filter(Boolean) : [],
+          vfx: Array.isArray(row.vfx) ? row.vfx.map((v) => String(v || '').trim()).filter(Boolean) : [],
+          sourceStartLine:
+            typeof row.sourceStartLine === 'number' ? Math.max(1, Math.round(row.sourceStartLine)) : undefined,
+          sourceEndLine: typeof row.sourceEndLine === 'number' ? Math.max(1, Math.round(row.sourceEndLine)) : undefined,
+        },
       };
-    }),
-    characters: Array.isArray((result as any).characters) ? (result as any).characters : [],
+    })
+    .filter((item) => item.beatId && item.visualTranslation && item.contextTag);
+}
+
+function fallbackShotsFromBeats(beats: BeatTableItem[]): ScriptBreakdownResponse['shots'] {
+  return beats.map((beat, index) => {
+    const gridLayout = normalizeGridLayout();
+    const cellCount = getGridCellCount(gridLayout);
+    return {
+      id: `sh_${String(index + 1).padStart(4, '0')}`,
+      beatId: beat.id,
+      sceneId: beat.sceneId,
+      originalText: beat.startLineText,
+      visualTranslation: beat.summary,
+      contextTag: '节拍',
+      shotKind: 'MIXED' as const,
+      scriptMapping: {
+        sourceStartLine: beat.startLine,
+        sourceEndLine: beat.endLine,
+      },
+      gridLayout,
+      matrixPrompts: Array(cellCount).fill(''),
+      status: 'pending' as const,
+      progress: 0,
+      characterIds: [],
+      sceneIds: [],
+      propIds: [],
+      videoUrls: Array(cellCount).fill(null),
+      videoStatus: Array(cellCount).fill('idle'),
+    };
+  });
+}
+
+export async function breakdownScript(script: string, config: GlobalConfig): Promise<ScriptBreakdownResponse> {
+  const ai = getClient();
+  const scriptLines = splitScriptLines(script);
+  const sceneTable = buildSceneTable(scriptLines);
+  const beatTable = buildBeatTable(scriptLines, sceneTable);
+
+  const overview = await generateScriptOverview(ai, script, sceneTable, beatTable);
+  const extractedAssets = await extractScriptAssets(ai, script).catch(() => ({ characters: [], scenes: [], props: [] }));
+
+  const shotDrafts: Array<{
+    beatId: string;
+    originalText: string;
+    visualTranslation: string;
+    contextTag: string;
+    shotKind: Shot['shotKind'];
+    scriptMapping: ShotScriptMapping;
+  }> = [];
+
+  for (const beatChunk of chunkBeats(beatTable)) {
+    try {
+      const chunkShots = await breakdownShotsForBeatChunk(ai, {
+        scriptLines,
+        scriptOverview: overview.scriptOverview,
+        scenes: sceneTable,
+        beats: beatChunk,
+      });
+      shotDrafts.push(...chunkShots);
+    } catch (error) {
+      console.warn('Shot chunk breakdown failed, fallback to beat-level shot.', error);
+    }
+  }
+
+  const fallbackShots = fallbackShotsFromBeats(beatTable);
+  const shots =
+    shotDrafts.length > 0
+      ? shotDrafts.map((item, index) => {
+          const beat = beatTable.find((row) => row.id === item.beatId);
+          const gridLayout = normalizeGridLayout();
+          const cellCount = getGridCellCount(gridLayout);
+          return {
+            id: `sh_${String(index + 1).padStart(4, '0')}`,
+            originalText: item.originalText || beat?.startLineText || '',
+            visualTranslation: item.visualTranslation,
+            contextTag: item.contextTag || '镜头',
+            sceneId: beat?.sceneId,
+            beatId: item.beatId,
+            scriptMapping: {
+              ...item.scriptMapping,
+              sourceStartLine: item.scriptMapping.sourceStartLine || beat?.startLine,
+              sourceEndLine: item.scriptMapping.sourceEndLine || beat?.endLine,
+            },
+            shotKind: item.shotKind || 'MIXED',
+            gridLayout,
+            matrixPrompts: Array(cellCount).fill(''),
+            status: 'pending' as const,
+            progress: 0,
+            characterIds: [],
+            sceneIds: [],
+            propIds: [],
+            videoUrls: Array(cellCount).fill(null),
+            videoStatus: Array(cellCount).fill('idle'),
+          };
+        })
+      : fallbackShots;
+
+  return {
+    context: overview.context || SYSTEM_INSTRUCTION_BREAKDOWN.trim(),
+    scriptOverview: overview.scriptOverview,
+    sceneTable,
+    beatTable,
+    extractedAssets,
+    shots,
+    characters: extractedAssets.characters.map((item) => ({ name: item.name, description: item.description })),
   };
 }
 

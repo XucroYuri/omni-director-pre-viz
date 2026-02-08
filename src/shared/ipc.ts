@@ -3,6 +3,8 @@ import type {
   ExportOptions,
   ExportResult,
   GlobalConfig,
+  ProjectSummary,
+  EpisodeSummary,
   PromptOptimization,
   ScriptBreakdownResponse,
   Shot,
@@ -14,6 +16,11 @@ export const IPC_CHANNELS = {
   ping: 'app:ping',
   app: {
     exportEpisode: 'app:exportEpisode',
+    project: {
+      list: 'app:project:list',
+      create: 'app:project:create',
+      createEpisode: 'app:project:createEpisode',
+    },
     media: {
       putBytes: 'app:media:putBytes',
     },
@@ -54,6 +61,11 @@ export type PreloadApi = {
   ping: () => Promise<string>;
   app: {
     exportEpisode: (options: ExportOptions) => Promise<ExportResult>;
+    project: {
+      list: () => Promise<ProjectSummary[]>;
+      create: (input: { name: string; description?: string }) => Promise<ProjectSummary>;
+      createEpisode: (input: { projectId: string; title?: string }) => Promise<EpisodeSummary>;
+    };
     media: {
       putBytes: (input: { bytes: Uint8Array; mimeType: string; relativeBase: string }) => Promise<string>;
     };

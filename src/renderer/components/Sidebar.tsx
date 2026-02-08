@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { GlobalConfig, Shot } from '@shared/types';
+import { BeatTableItem, GlobalConfig, SceneTableItem, Shot } from '@shared/types';
 import { getGridCellCount, normalizeGridLayout } from '@shared/utils';
 import { 
   Plus, User, Database, Sparkles, Loader2,
@@ -32,6 +32,9 @@ interface SidebarProps {
   script: string;
   setScript: (s: string) => void;
   handleBreakdown: () => void;
+  scriptOverview?: string;
+  sceneTable?: SceneTableItem[];
+  beatTable?: BeatTableItem[];
   episodeId: string;
   isElectronRuntime: boolean;
   notify?: (tone: NoticeTone, message: string) => void;
@@ -41,7 +44,7 @@ type SortOption = 'name' | 'newest';
 
 const Sidebar: React.FC<SidebarProps> = ({ 
   config, setConfig, shots, selectedShotId, setSelectedShotId, 
-  isLoading, script, setScript, handleBreakdown, episodeId, isElectronRuntime, notify,
+  isLoading, script, setScript, handleBreakdown, scriptOverview, sceneTable, beatTable, episodeId, isElectronRuntime, notify,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
   const [editorTab, setEditorTab] = useState<'script' | 'timeline' | 'visuals'>('script');
@@ -513,6 +516,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onChange={(e) => setScript(e.target.value)}
                     placeholder="在此粘贴剧本文本，开始 AI 拆解..."
                   />
+                  <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 space-y-1.5">
+                    <div className="text-[9px] font-black tracking-widest text-slate-500 uppercase">结构化解析摘要</div>
+                    <div className="text-[10px] text-slate-300 leading-relaxed line-clamp-4">
+                      {scriptOverview || '尚未生成剧本概述。执行拆解后可查看全局压缩上下文。'}
+                    </div>
+                    <div className="flex items-center gap-3 text-[9px] text-slate-500">
+                      <span>场景：{sceneTable?.length || 0}</span>
+                      <span>节拍：{beatTable?.length || 0}</span>
+                      <span>镜头：{shots.length}</span>
+                    </div>
+                  </div>
                   {!isElectronRuntime ? (
                     <p className="mt-2 text-[10px] text-amber-300">
                       当前为浏览器预览模式，脚本拆解仅在 Electron 桌面端可用。

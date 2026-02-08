@@ -28,6 +28,51 @@ export interface GridLayout {
   cols: number;
 }
 
+export interface SceneTableItem {
+  id: string;
+  title: string;
+  locationType: 'INT' | 'EXT' | 'INT/EXT' | 'UNKNOWN';
+  startLine: number;
+  endLine: number;
+  startLineText: string;
+  endLineText: string;
+}
+
+export interface BeatTableItem {
+  id: string;
+  sceneId: string;
+  summary: string;
+  startLine: number;
+  endLine: number;
+  startLineText: string;
+  endLineText: string;
+}
+
+export interface ScriptAssetCandidate {
+  name: string;
+  description: string;
+}
+
+export interface ScriptAssetExtraction {
+  characters: ScriptAssetCandidate[];
+  scenes: ScriptAssetCandidate[];
+  props: ScriptAssetCandidate[];
+}
+
+export interface ShotScriptMapping {
+  sceneHeading?: string;
+  action?: string;
+  characters?: string[];
+  dialogue?: string[];
+  parenthetical?: string[];
+  transition?: string;
+  sfx?: string[];
+  bgm?: string[];
+  vfx?: string[];
+  sourceStartLine?: number;
+  sourceEndLine?: number;
+}
+
 export interface ShotHistoryItem {
   timestamp: number;
   imageUrl: string; // 网格母图
@@ -50,6 +95,9 @@ export interface Shot {
   originalText: string;
   visualTranslation: string;
   contextTag: string;
+  sceneId?: string;
+  beatId?: string;
+  scriptMapping?: ShotScriptMapping;
   shotKind?: 'CHAR' | 'ENV' | 'POV' | 'INSERT' | 'MIXED';
   gridLayout?: GridLayout;
   matrixPrompts?: string[]; // 网格机位提示词（rows*cols）
@@ -132,12 +180,41 @@ export interface GlobalConfig {
 
 export interface ScriptBreakdownResponse {
   context: string;
+  scriptOverview?: string;
+  sceneTable?: SceneTableItem[];
+  beatTable?: BeatTableItem[];
+  extractedAssets?: ScriptAssetExtraction;
   shots: Shot[];
   characters: { name: string; description: string }[];
 }
 
+export interface EpisodeSummary {
+  episodeId: string;
+  projectId: string;
+  episodeNo: number;
+  title: string;
+  updatedAt: number;
+  shotCount: number;
+}
+
+export interface ProjectSummary {
+  projectId: string;
+  name: string;
+  description?: string;
+  updatedAt: number;
+  episodes: EpisodeSummary[];
+}
+
 export interface EpisodeData {
   episodeId: string;
+  projectId?: string;
+  episodeNo?: number;
+  title?: string;
+  script?: string;
+  context?: string;
+  scriptOverview?: string;
+  sceneTable?: SceneTableItem[];
+  beatTable?: BeatTableItem[];
   config: GlobalConfig;
   shots: Shot[];
   assets: {
