@@ -18,6 +18,7 @@
     "phase9:web:worker": "npm --prefix apps/web run worker",
     "phase9:web:worker:once": "npm --prefix apps/web run worker:once",
     "test:e2e:web-dead-letter-retry": "node scripts/e2e-web-dead-letter-retry.cjs",
+    "test:e2e:web-core-chain": "node scripts/e2e-web-core-chain.cjs",
     "dev": "concurrently \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
     "dev:electron": "concurrently \"tsc -p tsconfig.electron.json -w\" \"wait-on tcp:3000 dist/main/main.js dist/preload/preload.js && cross-env NODE_ENV=development node scripts/run-electron-dev.cjs\"",
