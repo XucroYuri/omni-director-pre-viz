@@ -21,7 +21,7 @@ function parseAuthMode(value: string | undefined): AuthMode {
   const trimmed = (value || '').trim();
   if (trimmed === 'disabled') return 'disabled';
   if (trimmed === 'dev_headers') return 'dev_headers';
-  return 'dev_headers';
+  return 'disabled';
 }
 
 function parseRole(value: string | null): AuthRole | null {
