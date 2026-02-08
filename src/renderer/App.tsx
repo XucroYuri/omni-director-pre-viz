@@ -4,7 +4,7 @@ import MatrixPromptEditor from './components/MatrixPromptEditor';
 import GlobalOpsPanel from './components/GlobalOpsPanel';
 import { DBTask, GlobalConfig, Shot, ScriptBreakdownResponse } from '@shared/types';
 import { DEFAULT_STYLE } from '@shared/constants';
-import { AlertCircle, BookOpenText, CheckCircle2, Cpu, Info, Keyboard, Settings, X } from 'lucide-react';
+import { AlertCircle, BookOpenText, CheckCircle2, Cpu, Info, Keyboard, PanelLeft, PanelRight, Settings, X } from 'lucide-react';
 import { breakdownScript } from './services/geminiService';
 
 const STORAGE_KEYS = {
@@ -156,6 +156,11 @@ const App: React.FC = () => {
   const [apiStatus, setApiStatus] = useState<ApiStatus>('idle');
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showLeftDrawer, setShowLeftDrawer] = useState(false);
+  const [showRightDrawer, setShowRightDrawer] = useState(false);
+  const [isWideLayout, setIsWideLayout] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 1536 : true,
+  );
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [notices, setNotices] = useState<UiNotice[]>([]);
 
@@ -246,6 +251,24 @@ const App: React.FC = () => {
       setShowOnboarding(true);
     }
   }, [script, shots.length]);
+
+  useEffect(() => {
+    const onResize = () => {
+      setIsWideLayout(window.innerWidth >= 1536);
+    };
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isWideLayout) {
+      setShowLeftDrawer(false);
+      setShowRightDrawer(false);
+    }
+  }, [isWideLayout]);
 
   useEffect(() => {
     const timer = persistTimers.current.config;
@@ -628,6 +651,8 @@ const App: React.FC = () => {
       if (event.key === 'Escape') {
         setShowShortcuts(false);
         setShowSettings(false);
+        setShowLeftDrawer(false);
+        setShowRightDrawer(false);
       }
 
       if (!isPrimary || isTyping) return;
@@ -657,49 +682,86 @@ const App: React.FC = () => {
     ? '一键跑通依赖 AI 拆解能力，仅在 Electron 桌面端可用。'
     : '';
 
-  return (
-    <div className="flex h-screen w-full bg-[#0f1115] text-slate-300 overflow-hidden font-sans">
-      <Sidebar
-        config={config}
-        setConfig={setConfig}
-        shots={shots}
-        selectedShotId={selectedShotId}
-        setSelectedShotId={setSelectedShotId}
-        isLoading={isLoading}
-        script={script}
-        setScript={setScript}
-        handleBreakdown={handleBreakdown}
-        episodeId={episodeId}
-        isElectronRuntime={isElectronRuntime}
-        notify={pushNotice}
-      />
+  const sidebarNode = (
+    <Sidebar
+      config={config}
+      setConfig={setConfig}
+      shots={shots}
+      selectedShotId={selectedShotId}
+      setSelectedShotId={(id) => {
+        setSelectedShotId(id);
+        if (!isWideLayout) setShowLeftDrawer(false);
+      }}
+      isLoading={isLoading}
+      script={script}
+      setScript={setScript}
+      handleBreakdown={handleBreakdown}
+      episodeId={episodeId}
+      isElectronRuntime={isElectronRuntime}
+      notify={pushNotice}
+    />
+  );
 
-      <div className="flex-1 flex flex-col">
+  const globalOpsNode = (
+    <GlobalOpsPanel
+      shots={shots}
+      episodeId={episodeId}
+      setEpisodeId={setEpisodeId}
+      onSaveEpisode={handleSaveEpisode}
+      onLoadEpisode={handleLoadEpisode}
+      onExportEpisode={handleExportEpisode}
+      isSavingEpisode={isSavingEpisode}
+      isLoadingEpisode={isLoadingEpisode}
+      isExporting={isExporting}
+      createZip={createZip}
+      setCreateZip={setCreateZip}
+      isElectronRuntime={isElectronRuntime}
+    />
+  );
+
+  return (
+    <div className="relative flex h-screen w-full overflow-hidden bg-[#0f1115] text-slate-300 font-sans">
+      {isWideLayout ? sidebarNode : null}
+
+      <div className="flex min-w-0 flex-1 flex-col">
         {!isElectronRuntime && (
-          <div className="h-10 px-6 border-b border-amber-400/20 bg-amber-500/10 flex items-center justify-between">
+          <div className="min-h-10 border-b border-amber-400/20 bg-amber-500/10 px-4 py-2 sm:px-6 flex flex-wrap items-center gap-2 justify-between">
             <div className="flex items-center gap-2 text-amber-200 text-[10px] font-bold uppercase tracking-widest">
               <Info size={12} /> 浏览器预览模式
             </div>
-            <span className="text-[10px] text-amber-200/80">
+            <span className="text-[10px] text-amber-200/80 leading-relaxed">
               任务队列、数据库和导出功能在 Electron 桌面端生效。
             </span>
           </div>
         )}
 
-        <header className="h-14 border-b border-white/10 flex items-center justify-between px-6 bg-[#16191f]/80 backdrop-blur-md">
-          <div className="flex items-center gap-4">
+        <header className="border-b border-white/10 bg-[#16191f]/80 px-4 py-2 sm:px-6 backdrop-blur-md flex flex-wrap items-center gap-3 justify-between">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+            {!isWideLayout && (
+              <button
+                onClick={() => {
+                  setShowRightDrawer(false);
+                  setShowLeftDrawer((prev) => !prev);
+                }}
+                className="h-8 px-2 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[10px] font-black tracking-wide flex items-center gap-1.5"
+                title="打开脚本与资产面板"
+              >
+                <PanelLeft size={14} />
+                资产
+              </button>
+            )}
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
               <Cpu size={18} className="text-white" />
             </div>
-            <div className="flex flex-col">
-              <h1 className="text-sm font-black text-white tracking-widest uppercase">
+            <div className="flex min-w-0 flex-col">
+              <h1 className="text-sm font-black text-white tracking-wide uppercase truncate">
                 Omni Director <span className="text-indigo-500">v5.0</span>
               </h1>
-              <span className="text-[9px] text-slate-500 uppercase tracking-widest">Pre-visualization Workstation</span>
+              <span className="text-[9px] text-slate-500 tracking-wider">预演工作站</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2 sm:gap-3">
             <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1">
               <span className={`w-2 h-2 rounded-full ${statusMeta[apiStatus].dot}`} />
               <span className={`text-[9px] font-black uppercase tracking-widest ${statusMeta[apiStatus].textTone}`}>
@@ -707,9 +769,23 @@ const App: React.FC = () => {
               </span>
             </div>
 
+            {!isWideLayout && (
+              <button
+                onClick={() => {
+                  setShowLeftDrawer(false);
+                  setShowRightDrawer((prev) => !prev);
+                }}
+                className="h-8 px-2 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[10px] font-black tracking-wide flex items-center gap-1.5"
+                title="打开导出与任务面板"
+              >
+                <PanelRight size={14} />
+                任务
+              </button>
+            )}
+
             <button
               onClick={() => setShowOnboarding(true)}
-              className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[9px] font-black uppercase tracking-widest flex items-center gap-2"
+              className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[10px] font-black tracking-wide flex items-center gap-2"
               title="重新打开首日上手引导"
             >
               <BookOpenText size={14} />
@@ -721,7 +797,7 @@ const App: React.FC = () => {
                 setShowSettings(false);
                 setShowShortcuts((prev) => !prev);
               }}
-              className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[9px] font-black uppercase tracking-widest flex items-center gap-2"
+              className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[10px] font-black tracking-wide flex items-center gap-2"
               title="快捷键与工作流提示"
             >
               <Keyboard size={14} />
@@ -733,15 +809,15 @@ const App: React.FC = () => {
                 setShowShortcuts(false);
                 setShowSettings((prev) => !prev);
               }}
-              className="p-2 text-slate-500 hover:text-white"
+              className="h-8 w-8 rounded-lg border border-white/10 bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 flex items-center justify-center"
               title="帮助与设置"
             >
-              <Settings size={18} />
+              <Settings size={15} />
             </button>
           </div>
         </header>
 
-        <main className="flex-1 overflow-hidden">
+        <main className="flex-1 min-w-0 overflow-hidden">
           {selectedShot ? (
             <MatrixPromptEditor
               shot={selectedShot}
@@ -777,17 +853,17 @@ const App: React.FC = () => {
             />
           ) : shots.length > 0 ? (
             <div className="h-full flex flex-col items-center justify-center gap-4 text-slate-500 px-8">
-              <p className="text-[11px] uppercase tracking-widest">当前未选中镜头</p>
+              <p className="text-[11px] tracking-widest">当前未选中镜头</p>
               <button
                 onClick={() => setSelectedShotId(shots[0].id)}
-                className="h-10 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest"
+                className="h-10 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black tracking-widest"
               >
                 选中第一个镜头
               </button>
             </div>
           ) : (
             <div className="h-full flex flex-col items-center justify-center gap-5 text-slate-500 px-8">
-              <p className="text-[11px] uppercase tracking-widest">开始创建你的第一组分镜</p>
+              <p className="text-[11px] tracking-widest">开始创建你的第一组分镜</p>
               <div className="max-w-xl text-center text-[11px] leading-relaxed text-slate-400">
                 在左侧粘贴剧本，点击 <span className="text-indigo-300 font-bold">拆解脚本</span> 自动拆解镜头，然后在主区域生成矩阵母图与视频预演。
               </div>
@@ -805,7 +881,7 @@ const App: React.FC = () => {
                   }
                 }}
                 disabled={!isElectronRuntime || isLoading}
-                className="h-10 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-40 disabled:hover:bg-indigo-600"
+                className="h-10 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black tracking-widest disabled:opacity-40 disabled:hover:bg-indigo-600"
                 title={quickStartDisabledReason}
               >
                 一键跑通首个镜头
@@ -820,20 +896,29 @@ const App: React.FC = () => {
         </main>
       </div>
 
-      <GlobalOpsPanel
-        shots={shots}
-        episodeId={episodeId}
-        setEpisodeId={setEpisodeId}
-        onSaveEpisode={handleSaveEpisode}
-        onLoadEpisode={handleLoadEpisode}
-        onExportEpisode={handleExportEpisode}
-        isSavingEpisode={isSavingEpisode}
-        isLoadingEpisode={isLoadingEpisode}
-        isExporting={isExporting}
-        createZip={createZip}
-        setCreateZip={setCreateZip}
-        isElectronRuntime={isElectronRuntime}
-      />
+      {isWideLayout ? globalOpsNode : null}
+
+      {!isWideLayout && showLeftDrawer && (
+        <div className="fixed inset-0 z-[250] flex">
+          <button
+            aria-label="关闭左侧面板"
+            className="absolute inset-0 bg-black/65"
+            onClick={() => setShowLeftDrawer(false)}
+          />
+          <div className="relative h-full w-[min(20rem,92vw)]">{sidebarNode}</div>
+        </div>
+      )}
+
+      {!isWideLayout && showRightDrawer && (
+        <div className="fixed inset-0 z-[250] flex justify-end">
+          <button
+            aria-label="关闭右侧面板"
+            className="absolute inset-0 bg-black/65"
+            onClick={() => setShowRightDrawer(false)}
+          />
+          <div className="relative h-full w-[min(20rem,92vw)]">{globalOpsNode}</div>
+        </div>
+      )}
 
       {notices.length > 0 && (
         <div className="fixed bottom-6 right-6 z-[320] flex flex-col gap-2 max-w-[420px]">

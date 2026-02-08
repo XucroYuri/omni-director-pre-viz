@@ -307,19 +307,19 @@ const Sidebar: React.FC<SidebarProps> = ({
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-indigo-950/40">
                  <Loader2 size={16} className="text-indigo-400 animate-spin" />
                  <div className="absolute inset-x-0 h-[2px] bg-indigo-400/70 shadow-[0_0_10px_indigo] animate-[scanner_2s_infinite_ease-in-out]" />
-                 <span className="text-[7px] text-indigo-400 font-black mt-1 uppercase tracking-tighter">Processing</span>
+                 <span className="text-[7px] text-indigo-400 font-black mt-1 tracking-tighter">处理中</span>
               </div>
             ) : item.refImage ? (
               <>
                 <img src={item.refImage} className="w-full h-full object-cover transition-transform group-hover/img:scale-110" />
                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/img:opacity-100 flex flex-col items-center justify-center gap-1 transition-opacity">
                   <Camera size={14} className="text-white" />
-                  <span className="text-[7px] text-white font-bold uppercase">Change</span>
+                  <span className="text-[7px] text-white font-bold">更换</span>
                 </div>
                 <button 
                   onClick={(e) => { e.stopPropagation(); updateItem(type, item.id, { refImage: undefined }); }}
                   className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full p-0.5 shadow-lg opacity-0 group-hover/img:opacity-100 transition-opacity z-10"
-                  title="Remove Image"
+                  title="移除参考图"
                 >
                   <X size={8} />
                 </button>
@@ -330,12 +330,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                    <button 
                      onClick={() => handleGenerateAssetRef(type, item.id)}
                      className="p-1 text-indigo-400 hover:text-white hover:bg-indigo-500/30 rounded-md transition-all"
-                     title="AI Generate Reference"
+                     title="AI 生成参考图"
                    >
                      <Wand2 size={14} className="animate-pulse" />
                    </button>
                 </div>
-                <span className="text-[7px] font-bold uppercase text-slate-500">AI / Upload</span>
+                <span className="text-[7px] font-bold text-slate-500">AI / 上传</span>
               </div>
             )}
             {!isGenerating && !item.refImage && (
@@ -357,8 +357,8 @@ const Sidebar: React.FC<SidebarProps> = ({
             />
             <div className="flex items-center gap-2">
                <span className={`text-[8px] font-black uppercase tracking-wider ${theme.text}`}>{label}</span>
-               {item.tags?.includes('Auto-Scan') && <span className="text-[7px] px-1 bg-indigo-500/20 text-indigo-300 rounded-sm font-bold uppercase border border-indigo-500/10">Synced</span>}
-               {isLinkedToShot && <span className={`text-[7px] px-1 bg-${colorKey}-500/20 text-${colorKey}-300 rounded-sm font-bold uppercase border border-${colorKey}-500/10`}>Linked</span>}
+               {item.tags?.includes('Auto-Scan') && <span className="text-[7px] px-1 bg-indigo-500/20 text-indigo-300 rounded-sm font-bold border border-indigo-500/10">已同步</span>}
+               {isLinkedToShot && <span className={`text-[7px] px-1 bg-${colorKey}-500/20 text-${colorKey}-300 rounded-sm font-bold border border-${colorKey}-500/10`}>已绑定</span>}
             </div>
           </div>
           
@@ -366,7 +366,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <button 
               onClick={() => handleEnhanceDescription(type, item.id)} 
               className="p-1.5 text-indigo-300 hover:bg-indigo-500/20 rounded-md transition-colors"
-              title="AI Enhance"
+              title="AI 增强描述"
             >
               {isEnhancingId === item.id ? <Loader2 size={12} className="animate-spin"/> : <Sparkles size={12}/>}
             </button>
@@ -391,7 +391,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <Plus size={8} className="text-slate-600" />
             <input 
               type="text" 
-              placeholder="Tag" 
+              placeholder="标签" 
               className="bg-transparent border-none text-[8px] outline-none text-slate-300 w-10 placeholder:text-slate-700"
               value={tagInput}
               onChange={(e) => setTagInput(e.target.value)}
@@ -411,7 +411,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             className="w-full bg-black/40 border border-white/5 rounded-md p-2 text-[10px] leading-snug h-16 outline-none text-slate-300 focus:text-slate-100 focus:border-indigo-500/40 focus:bg-white/5 transition-all resize-none scrollbar-none placeholder:text-slate-700"
             value={item.description}
             onChange={(e) => updateItem(type, item.id, { description: e.target.value })}
-            placeholder="Visual configuration details..."
+            placeholder="填写资产外观、材质、动作特征..."
           />
         </div>
       </div>
@@ -446,7 +446,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         {!collapsed && (
           <div className="flex items-center gap-3">
             <div className="w-6 h-6 bg-indigo-500/20 rounded flex items-center justify-center border border-indigo-500/30"><Database size={12} className="text-indigo-400" /></div>
-            <span className="text-[11px] font-black text-slate-100 tracking-[0.2em] uppercase">Control Center</span>
+            <span className="text-[11px] font-black text-slate-100 tracking-[0.12em]">控制中心</span>
           </div>
         )}
         <button onClick={() => setCollapsed(!collapsed)} className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors">
@@ -462,7 +462,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               <div className="p-2 border-b border-white/10 bg-black/30 grid grid-cols-2 gap-2">
                 <button
                   onClick={() => setEditorTab('script')}
-                  className={`h-9 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                  className={`h-9 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-2 ${
                     editorTab === 'script'
                       ? 'bg-indigo-600 text-white'
                       : 'bg-white/5 text-slate-300 hover:text-white'
@@ -473,7 +473,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </button>
                 <button
                   onClick={() => setEditorTab('timeline')}
-                  className={`h-9 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                  className={`h-9 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-2 ${
                     editorTab === 'timeline'
                       ? 'bg-indigo-600 text-white'
                       : 'bg-white/5 text-slate-300 hover:text-white'
@@ -573,21 +573,21 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onClick={handleUndoDelete}
                     className="h-7 px-2 rounded-md bg-amber-400/20 border border-amber-300/40 text-amber-100 hover:bg-amber-300/30 text-[9px] font-black uppercase tracking-widest shrink-0"
                   >
-                    Undo
+                    撤销
                   </button>
                 </div>
               )}
 
               {[
-                { key: 'characters', label: 'Cast (Characters)', color: 'indigo', items: filtered.c, prefix: '角色' },
-                { key: 'scenes', label: 'Environments', color: 'amber', items: filtered.s, prefix: '场景' },
-                { key: 'props', label: 'Objects & Props', color: 'emerald', items: filtered.p, prefix: '道具' }
+                { key: 'characters', label: '角色', color: 'indigo', items: filtered.c, prefix: '角色' },
+                { key: 'scenes', label: '场景', color: 'amber', items: filtered.s, prefix: '场景' },
+                { key: 'props', label: '道具', color: 'emerald', items: filtered.p, prefix: '道具' }
               ].map(cat => (
                 <section key={cat.key}>
                   <div className={`flex items-center justify-between mb-4`}>
                     <div className="flex items-center gap-2 cursor-pointer group" onClick={() => toggle(cat.key as any)}>
                       <div className={`w-2 h-2 rounded-full ${themeMap[cat.color as 'indigo'].bg}`} />
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{cat.label} ({cat.items.length})</span>
+                      <span className="text-[10px] font-black text-slate-400 tracking-widest">{cat.label} ({cat.items.length})</span>
                     </div>
                     <button onClick={() => addItem(cat.key as any, cat.prefix)} className="p-1.5 bg-white/5 hover:bg-white/15 rounded-md border border-white/5 text-slate-400 hover:text-white transition-all"><Plus size={14}/></button>
                   </div>
@@ -610,7 +610,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             onClick={handleBreakdown}
             disabled={!canRunBreakdown}
             title={breakdownDisabledReason}
-            className="w-full h-11 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-indigo-600"
+            className="w-full h-11 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-indigo-600"
           >
             {isLoading ? '脚本拆解中...' : '开始拆解脚本'}
           </button>

@@ -47,7 +47,7 @@ const GlobalOpsPanel: React.FC<GlobalOpsPanelProps> = ({
   return (
     <aside className="w-80 bg-[#16191f] border-l border-white/10 flex flex-col shrink-0">
       <div className="h-14 border-b border-white/10 px-4 flex items-center">
-        <span className="text-[11px] font-black text-slate-100 tracking-[0.18em] uppercase">Global Ops</span>
+        <span className="text-[11px] font-black text-slate-100 tracking-[0.12em]">全局操作</span>
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
@@ -88,14 +88,14 @@ const GlobalOpsPanel: React.FC<GlobalOpsPanelProps> = ({
         <section className="bg-slate-500/5 rounded-xl border border-white/10 p-4">
           <div className="flex items-center gap-2 mb-3">
             <Database size={14} className="text-slate-300" />
-            <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">Database</span>
+            <span className="text-[10px] font-black text-slate-200 tracking-widest">数据库</span>
           </div>
           {!isElectronRuntime ? (
             <p className="mb-3 text-[10px] text-amber-300">当前为浏览器预览模式，数据库功能不可用。</p>
           ) : null}
           <div className="mb-3">
             <label className="text-[9px] font-black uppercase tracking-widest text-slate-500">
-              Episode ID
+              分集 ID
             </label>
             <input
               value={episodeId}

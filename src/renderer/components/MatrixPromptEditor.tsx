@@ -81,7 +81,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     : !shot.generatedImageUrl
     ? '请先渲染矩阵母图，再生成 Animatic。'
     : isGeneratingAnimatic
-      ? 'Animatic 正在生成中。'
+      ? 'Animatic 正在生成。'
       : '';
 
   const assetVideoDisabledReason = hasAssetVideoOutput
@@ -91,7 +91,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     : !hasAssetRefs
       ? '请先为已绑定资产上传参考图。'
       : isGeneratingAssetVideo
-        ? 'Asset Video 正在生成中。'
+        ? '资产视频正在生成。'
         : '';
 
   const downloadDisabledReason = !shot.splitImages?.length ? '母图切片未完成，暂无可下载子图。' : '';
@@ -102,10 +102,10 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
       : '';
 
   const inlineHints = [
-    !hasBoundAssets ? '未绑定资产：建议先在 Cast/Env 区绑定关键对象，避免生成策略失败。' : '',
-    !shot.generatedImageUrl && !hasAnimaticOutput ? 'Animatic 功能需要先渲染矩阵母图。' : '',
-    hasBoundAssets && !hasAssetRefs && !hasAssetVideoOutput ? 'Asset Video 功能需要已绑定资产具备参考图。' : '',
-    !hasPromptContent ? '当前 Prompt 为空：请先初始化或编辑 Prompt。' : '',
+    !hasBoundAssets ? '未绑定资产：请先在角色/场景区绑定关键对象，避免生成失败。' : '',
+    !shot.generatedImageUrl && !hasAnimaticOutput ? 'Animatic 需要先渲染矩阵母图。' : '',
+    hasBoundAssets && !hasAssetRefs && !hasAssetVideoOutput ? '资产视频需要已绑定资产具备参考图。' : '',
+    !hasPromptContent ? '当前 Prompt 为空：请先初始化或手动填写。' : '',
   ].filter(Boolean);
 
   useEffect(() => {
@@ -301,7 +301,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
 
   const AssetChip = ({ label, tone }: { label: string; tone: 'indigo' | 'amber' | 'emerald' }) => (
     <span
-      className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+      className={`px-2 py-0.5 rounded-full text-[9px] font-black tracking-widest border ${
         tone === 'indigo'
           ? 'border-indigo-400/40 text-indigo-300 bg-indigo-500/10'
           : tone === 'amber'
@@ -316,38 +316,38 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
   return (
     <div className="h-full flex flex-col overflow-hidden bg-[#0f1115]">
       {/* 工具栏 */}
-      <div className="h-14 border-b border-white/10 flex items-center justify-between px-6 shrink-0 bg-[#16191f]/80 backdrop-blur-md z-20">
-        <div className="flex items-center gap-6">
-          <div className="flex flex-col">
-            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Selected Shot</span>
+      <div className="border-b border-white/10 bg-[#16191f]/80 px-4 py-3 sm:px-6 shrink-0 backdrop-blur-md z-20 flex flex-wrap items-start gap-3">
+        <div className="min-w-0 flex flex-1 items-center gap-3 sm:gap-5">
+          <div className="flex shrink-0 flex-col">
+            <span className="text-[9px] font-black text-slate-500 tracking-widest">当前镜头</span>
             <span className="text-[12px] font-mono font-black text-indigo-400">SH_{shot.id.substring(0, 4)}</span>
           </div>
-          <div className="h-6 w-px bg-white/10" />
-          <div className="flex flex-col">
-            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Logic Breakdown</span>
-            <span className="text-[12px] text-slate-100 font-medium italic truncate max-w-[300px]">"{shot.visualTranslation}"</span>
+          <div className="h-6 w-px bg-white/10 shrink-0" />
+          <div className="min-w-0 flex flex-col">
+            <span className="text-[9px] font-black text-slate-500 tracking-widest">视觉拆解</span>
+            <span className="text-[12px] text-slate-100 font-medium italic truncate max-w-full sm:max-w-[360px]">"{shot.visualTranslation}"</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setShowRenderSettings((prev) => !prev)}
-            className="h-9 px-3 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+            className="h-9 px-3 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all"
           >
-            {showRenderSettings ? '收起参数' : '生成参数'}
+            {showRenderSettings ? '收起参数' : '展开参数'}
           </button>
           <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-2 h-9">
-            <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">Shot Kind</span>
+            <span className="text-[9px] font-black tracking-widest text-slate-500">镜头类型</span>
             <select
-              className="bg-transparent text-[10px] font-black uppercase tracking-widest text-slate-200 outline-none"
+              className="bg-transparent text-[10px] font-black tracking-widest text-slate-200 outline-none"
               value={shot.shotKind || 'CHAR'}
               onChange={(e) => onUpdateShot({ shotKind: e.target.value as Shot['shotKind'] })}
             >
-              <option value="CHAR">CHAR</option>
-              <option value="ENV">ENV</option>
-              <option value="POV">POV</option>
-              <option value="INSERT">INSERT</option>
-              <option value="MIXED">MIXED</option>
+              <option value="CHAR">角色 CHAR</option>
+              <option value="ENV">环境 ENV</option>
+              <option value="POV">主观 POV</option>
+              <option value="INSERT">插入 INSERT</option>
+              <option value="MIXED">混合 MIXED</option>
             </select>
           </div>
           <button
@@ -359,11 +359,11 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
               }
             }}
             disabled={!canGenerateAnimatic}
-            className="h-9 px-4 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+            className="h-9 px-4 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
             title={animaticDisabledReason}
           >
             {isGeneratingAnimatic ? <Loader2 size={14} className="animate-spin" /> : <Film size={14} />}
-            {shot.animaticVideoUrl ? 'Animatic Preview' : 'Generate Animatic'}
+            {shot.animaticVideoUrl ? '预览 Animatic' : '生成 Animatic'}
           </button>
           <button
             onClick={() => {
@@ -374,33 +374,33 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
               }
             }}
             disabled={!canGenerateAssetVideo}
-            className="h-9 px-4 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+            className="h-9 px-4 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
             title={assetVideoDisabledReason}
           >
             {isGeneratingAssetVideo ? <Loader2 size={14} className="animate-spin" /> : <Layers size={14} />}
-            {shot.assetVideoUrl ? 'Asset Video Preview' : 'Asset Video'}
+            {shot.assetVideoUrl ? '预览资产视频' : '生成资产视频'}
           </button>
           <button
             onClick={handleBatchDownload}
             disabled={!canDownloadAll}
-            className="h-9 px-4 bg-white/5 border border-white/10 text-slate-400 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+            className="h-9 px-4 bg-white/5 border border-white/10 text-slate-400 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
             title={downloadDisabledReason}
           >
-            <Download size={14} /> Download All
+            <Download size={14} /> 下载全部
           </button>
-          <div className="h-6 w-px bg-white/10" />
-          <button onClick={handleInitializeShot} disabled={isPromptingAll || isAutoLinking} className={`h-9 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 shadow-lg ${isPromptingAll ? 'animate-pulse' : ''}`}>
+          <div className="h-6 w-px bg-white/10 hidden md:block" />
+          <button onClick={handleInitializeShot} disabled={isPromptingAll || isAutoLinking} className={`h-9 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 shadow-lg ${isPromptingAll ? 'animate-pulse' : ''}`}>
             {isPromptingAll ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-            初始化矩阵 (Initialize)
+            初始化矩阵
           </button>
           <button
             onClick={onGenerateImage}
             disabled={!canRenderMatrix}
-            className="px-6 h-9 bg-slate-100 text-black hover:bg-indigo-500 hover:text-white disabled:opacity-20 rounded-lg text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-2 shadow-xl"
+            className="px-6 h-9 bg-slate-100 text-black hover:bg-indigo-500 hover:text-white disabled:opacity-20 rounded-lg text-[11px] font-black tracking-widest transition-all flex items-center gap-2 shadow-xl"
             title={renderDisabledReason}
           >
             {isGeneratingImage ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} />}
-            渲染矩阵母图
+            渲染母图
           </button>
         </div>
       </div>
@@ -475,13 +475,13 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
       {/* 资产区 */}
       <div className="h-24 border-b border-white/10 bg-[#0f1115] flex items-center px-6 gap-8 shrink-0 overflow-x-auto scrollbar-none">
         <div className="flex items-center gap-4 border-r border-white/10 pr-8">
-          <div className="flex flex-col items-center gap-1"><User size={12} className="text-indigo-400" /><span className="text-[8px] font-black uppercase text-slate-500">Cast</span></div>
+          <div className="flex flex-col items-center gap-1"><User size={12} className="text-indigo-400" /><span className="text-[8px] font-black text-slate-500">角色</span></div>
           {config.characters.map(char => (
             <AssetBubble key={char.id} item={char} accentColor="indigo" active={shot.characterIds?.includes(char.id)} onUnlink={() => {}} typeIcon={<User size={16}/>} />
           ))}
         </div>
         <div className="flex items-center gap-4">
-          <div className="flex flex-col items-center gap-1"><MapIcon size={12} className="text-amber-400" /><span className="text-[8px] font-black uppercase text-slate-500">Env</span></div>
+          <div className="flex flex-col items-center gap-1"><MapIcon size={12} className="text-amber-400" /><span className="text-[8px] font-black text-slate-500">场景</span></div>
           {config.scenes.map(scene => (
             <AssetBubble key={scene.id} item={scene} accentColor="amber" active={shot.sceneIds?.includes(scene.id)} onUnlink={() => {}} typeIcon={<MapIcon size={16}/>} />
           ))}
@@ -509,20 +509,20 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
       </div>
 
       {/* 矩阵核心：单母图模式 vs 子图模式 */}
-      <div className="flex-1 p-4 bg-[#0d0f13] overflow-hidden flex items-center justify-center relative">
-        <div className="grid grid-cols-3 grid-rows-3 gap-2.5 w-full h-full">
+      <div className="flex-1 p-4 bg-[#0d0f13] overflow-auto relative">
+        <div className="grid grid-cols-3 grid-rows-3 gap-2.5 min-w-[840px] min-h-[540px] h-full">
           {prompts.map((p, idx) => {
             const hasSlicing = !!shot.splitImages?.[idx];
             const videoUrl = shot.videoUrls?.[idx];
             const videoStatus = shot.videoStatus?.[idx] || 'idle';
             const isVideoBusy = videoStatus === 'queued' || videoStatus === 'processing' || videoStatus === 'downloading';
             const statusLabel = {
-              idle: 'Ready',
-              queued: 'Queued',
-              processing: 'Processing',
-              downloading: 'Downloading',
-              completed: 'Completed',
-              failed: 'Failed',
+              idle: '待命',
+              queued: '排队',
+              processing: '处理中',
+              downloading: '下载中',
+              completed: '完成',
+              failed: '失败',
             }[videoStatus];
 
             return (
@@ -571,7 +571,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                     {videoStatus === 'failed' && (
                       <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-2">
                         <AlertTriangle size={20} className="text-rose-400" />
-                        <span className="text-[9px] font-black text-rose-300 uppercase tracking-widest">Failed</span>
+                        <span className="text-[9px] font-black text-rose-300 tracking-widest">失败</span>
                       </div>
                     )}
                   </div>
@@ -615,7 +615,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
               <div className="bg-white/5 backdrop-blur-xl p-8 rounded-2xl border border-white/10 w-full">
                  <div className="flex items-center gap-3 mb-3">
                    <span className="px-3 py-1 bg-indigo-500 text-white text-[10px] font-black rounded-lg uppercase">{camNames[activePreviewIndex]}</span>
-                   <span className="text-slate-500 text-xs font-mono">SHOT: {shot.id}</span>
+                   <span className="text-slate-500 text-xs font-mono">镜头: {shot.id}</span>
                  </div>
                  <p className="text-slate-200 text-sm leading-relaxed italic">"{prompts[activePreviewIndex]}"</p>
               </div>
@@ -637,7 +637,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             <div className="bg-white/5 backdrop-blur-xl p-6 rounded-2xl border border-white/10 w-full">
               <div className="flex items-center gap-3 mb-2">
                 <span className="px-3 py-1 bg-indigo-500 text-white text-[10px] font-black rounded-lg uppercase">Animatic</span>
-                <span className="text-slate-500 text-xs font-mono">SHOT: {shot.id}</span>
+                <span className="text-slate-500 text-xs font-mono">镜头: {shot.id}</span>
               </div>
               <p className="text-slate-200 text-sm leading-relaxed italic">"{shot.visualTranslation}"</p>
             </div>
@@ -658,8 +658,8 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             </div>
             <div className="bg-white/5 backdrop-blur-xl p-6 rounded-2xl border border-white/10 w-full">
               <div className="flex items-center gap-3 mb-2">
-                <span className="px-3 py-1 bg-emerald-500 text-white text-[10px] font-black rounded-lg uppercase">Asset Video</span>
-                <span className="text-slate-500 text-xs font-mono">SHOT: {shot.id}</span>
+                <span className="px-3 py-1 bg-emerald-500 text-white text-[10px] font-black rounded-lg">资产视频</span>
+                <span className="text-slate-500 text-xs font-mono">镜头: {shot.id}</span>
               </div>
               <p className="text-slate-200 text-sm leading-relaxed italic">"{shot.visualTranslation}"</p>
             </div>
@@ -676,7 +676,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                   <Film size={18} />
                 </div>
                 <div>
-                  <div className="text-[11px] font-black uppercase tracking-widest text-slate-300">Video Generation</div>
+                  <div className="text-[11px] font-black tracking-widest text-slate-300">视频生成</div>
                   <div className="text-[10px] text-slate-500">确认后开始调用 Sora-2</div>
                 </div>
               </div>
@@ -690,31 +690,31 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 px-6 py-5">
               <div className="space-y-4">
-                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Reference Frame</div>
+                <div className="text-[10px] font-black tracking-widest text-slate-400">参考帧</div>
                 <div className="aspect-video bg-black/40 border border-white/10 rounded-xl overflow-hidden">
                   {shot.splitImages?.[videoModalIndex] ? (
                     <img src={shot.splitImages[videoModalIndex]} className="w-full h-full object-cover" />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">No image</div>
+                    <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">暂无图像</div>
                   )}
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
-                  <span>Shot: SH_{shot.id.substring(0, 4)}</span>
+                  <span>镜头: SH_{shot.id.substring(0, 4)}</span>
                   <span>{camNames[videoModalIndex]}</span>
                 </div>
               </div>
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Video Prompt</span>
+                  <span className="text-[10px] font-black tracking-widest text-slate-400">视频提示词</span>
                   <button
                     onClick={() => {
                       setVideoPromptDraft(prompts[videoModalIndex] || shot.visualTranslation);
                       setSyncVideoPrompt(true);
                     }}
-                    className="text-[10px] font-black uppercase text-indigo-300 hover:text-indigo-200"
+                    className="text-[10px] font-black text-indigo-300 hover:text-indigo-200"
                   >
-                    使用当前镜头 Prompt
+                    使用当前镜头提示词
                   </button>
                 </div>
                 <textarea
@@ -730,7 +730,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                     onChange={(e) => setSyncVideoPrompt(e.target.checked)}
                     className="accent-indigo-500"
                   />
-                  同步更新该机位的矩阵 Prompt
+                  同步更新该机位 Prompt
                 </label>
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[10px] text-amber-200">
                   提示：视频生成耗时较长，建议确认提示词后再开始生成。
@@ -740,12 +740,12 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
 
             <div className="flex items-center justify-between px-6 py-4 border-t border-white/10 bg-[#10131a]">
               <div className="text-[10px] text-slate-500">
-                状态流转：Queued → Processing → Downloading → Completed
+                状态流转：排队 → 处理中 → 下载中 → 完成
               </div>
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setVideoModalIndex(null)}
-                  className="h-9 px-4 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest"
+                  className="h-9 px-4 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 text-[10px] font-black tracking-widest"
                 >
                   取消
                 </button>
@@ -760,9 +760,9 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                     handleCreateShotVideo(videoModalIndex, finalPrompt);
                     setVideoModalIndex(null);
                   }}
-                  className="h-9 px-5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-400 text-[10px] font-black uppercase tracking-widest shadow-lg"
+                  className="h-9 px-5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-400 text-[10px] font-black tracking-widest shadow-lg"
                 >
-                  确认生成
+                  开始生成
                 </button>
               </div>
             </div>
