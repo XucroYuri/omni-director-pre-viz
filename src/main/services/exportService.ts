@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { app } from 'electron';
 import archiver = require('archiver');
 import type { ExportOptions, ExportResult, Manifest, ManifestShot } from '../../shared/types';
+import { resolveMediaRefToFilePath } from './mediaService';
 
 function parseDataUri(dataUri: string) {
   const match = dataUri.match(/^data:([^;]+);base64,(.+)$/);
@@ -24,6 +25,17 @@ async function saveDataUriFile(dataUri: string, filePath: string) {
   await fs.writeFile(filePath, Buffer.from(base64, 'base64'));
 }
 
+async function saveMediaRef(ref: string, destPath: string) {
+  if (ref.startsWith('data:')) {
+    await saveDataUriFile(ref, destPath);
+    return true;
+  }
+  const resolved = resolveMediaRefToFilePath(ref);
+  if (!resolved) return false;
+  await copyFileSafe(resolved, destPath);
+  return true;
+}
+
 async function copyFileSafe(src: string, dest: string) {
   try {
     await fs.copyFile(src, dest);
@@ -33,16 +45,7 @@ async function copyFileSafe(src: string, dest: string) {
 }
 
 async function saveVideo(url: string, destPath: string) {
-  if (url.startsWith('data:')) {
-    await saveDataUriFile(url, destPath);
-    return true;
-  }
-  if (url.startsWith('file://')) {
-    const srcPath = url.replace('file://', '');
-    await copyFileSafe(srcPath, destPath);
-    return true;
-  }
-  return false;
+  return saveMediaRef(url, destPath);
 }
 
 function getAssetNames(ids: string[] | undefined, assets: { id: string; name: string }[]) {
@@ -80,7 +83,7 @@ export async function exportEpisode(options: ExportOptions): Promise<ExportResul
       const safeShotId = safeId(shot.id);
 
       const matrixFilename = `Shot_${safeShotId}_Matrix.png`;
-      await saveDataUriFile(shot.generatedImageUrl, path.join(exportPath, matrixFilename));
+      await saveMediaRef(shot.generatedImageUrl, path.join(exportPath, matrixFilename));
 
       const sliceFilenames: string[] = [];
       if (shot.splitImages) {
@@ -88,7 +91,7 @@ export async function exportEpisode(options: ExportOptions): Promise<ExportResul
           const slice = shot.splitImages[i];
           if (!slice) continue;
           const filename = `Shot_${safeShotId}_Angle_${pad2(i + 1)}.png`;
-          await saveDataUriFile(slice, path.join(exportPath, filename));
+          await saveMediaRef(slice, path.join(exportPath, filename));
           sliceFilenames.push(filename);
         }
       }
