@@ -1,5 +1,20 @@
 'use strict';
 
+// Phase 9.4: SQLite -> Postgres migration utility.
+//
+// Usage:
+//   OMNI_SQLITE_DB_PATH=/abs/path/to/omni-director.db \
+//   OMNI_MIGRATION_REPORT_PATH=./migration-report.json \
+//   npm run phase9:migrate:sqlite
+//
+// Optional args:
+//   --db <path>
+//   --report <path>
+//
+// Notes:
+// - Uses better-sqlite3 if available, otherwise falls back to `sqlite3 -json`.
+// - Preserves unmapped legacy fields into `legacy_*_data` tables (JSONB).
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
