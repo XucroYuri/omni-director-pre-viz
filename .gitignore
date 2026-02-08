@@ -1,6 +1,7 @@
 # Logs
 logs
 *.log
+*.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -14,6 +15,14 @@ dist-ssr
 output
 tmp
 temp_verification_out
+
+# Build artifacts / local caches
+dist-app
+.npm-cache
+.sisyphus
+
+# Next.js (apps/web has its own .gitignore too)
+.next
 
 # Editor directories and files
 .vscode/*

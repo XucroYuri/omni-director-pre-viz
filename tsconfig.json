@@ -28,5 +28,14 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "include": ["src/renderer/**/*", "src/shared/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-app",
+    "apps",
+    "src/main",
+    "src/preload"
+  ]
 }
