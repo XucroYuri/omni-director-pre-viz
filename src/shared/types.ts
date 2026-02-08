@@ -23,12 +23,18 @@ export interface Prop {
   tags?: string[];
 }
 
+export interface GridLayout {
+  rows: number;
+  cols: number;
+}
+
 export interface ShotHistoryItem {
   timestamp: number;
-  imageUrl: string; // 3x3 母图
-  splitImages?: string[]; // 物理切片后的 9 张子图
+  imageUrl: string; // 网格母图
+  gridLayout?: GridLayout;
+  splitImages?: string[]; // 基于网格切片的子图
   prompts: string[];
-  videoUrls?: (string | null)[]; // 对应 9 个机位的视频生成结果
+  videoUrls?: (string | null)[]; // 对应各机位的视频生成结果
 }
 
 export interface PromptOptimization {
@@ -45,11 +51,12 @@ export interface Shot {
   visualTranslation: string;
   contextTag: string;
   shotKind?: 'CHAR' | 'ENV' | 'POV' | 'INSERT' | 'MIXED';
-  matrixPrompts?: string[]; // 9个机位的提示词 (作为生成母图的参数)
-  generatedImageUrl?: string; // 3x3 矩阵母图
-  splitImages?: string[]; // 物理切片后的9张图
-  videoUrls?: (string | null)[]; // 9个视角对应的视频结果
-  animaticVideoUrl?: string; // 基于 3x3 母图生成的动态分镜视频 (Matrix Video)
+  gridLayout?: GridLayout;
+  matrixPrompts?: string[]; // 网格机位提示词（rows*cols）
+  generatedImageUrl?: string; // 网格母图
+  splitImages?: string[]; // 基于网格切片后的子图
+  videoUrls?: (string | null)[]; // 视角对应的视频结果
+  animaticVideoUrl?: string; // 基于网格母图生成的动态分镜视频 (Matrix Video)
   assetVideoUrl?: string; // 基于资产拼贴图生成的视频 (Asset Video)
   status: 'pending' | 'processing' | 'completed' | 'failed';
   videoStatus?: ('idle' | 'queued' | 'processing' | 'downloading' | 'completed' | 'failed')[];

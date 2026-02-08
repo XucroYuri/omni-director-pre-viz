@@ -2,7 +2,14 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import sharp = require('sharp');
-import type { DBTask, VideoGenerationParams } from '../../shared/types';
+import type { DBTask, GridLayout, ShotHistoryItem, VideoGenerationParams } from '../../shared/types';
+import {
+  ensurePromptListLength,
+  getGridCellCount,
+  normalizeGridLayout,
+  parseMatrixPromptPayload,
+  serializeMatrixPromptPayload,
+} from '../../shared/utils';
 import { generateAssetImage, generateGridImage } from '../providers/aihubmix/gemini';
 import { generateShotVideo } from '../providers/aihubmix/sora2';
 import { getAihubmixEnv } from '../providers/aihubmix/env';
@@ -32,19 +39,41 @@ export class TaskRunner {
         const shot = payload.shot as any;
         const config = payload.config as any;
         if (!shot || !config) throw new Error('MATRIX_GEN requires shot and config');
-        const { path: gridPath } = await generateGridImage(shot, config, signal);
-        const splitPaths = await this.splitGridImage(gridPath, shot.id);
+        const gridLayout = normalizeGridLayout(shot.gridLayout);
+        const cellCount = getGridCellCount(gridLayout);
+        const matrixPrompts = ensurePromptListLength(shot.matrixPrompts, gridLayout);
+        const matrixShot = { ...shot, gridLayout, matrixPrompts };
+
+        const { path: gridPath } = await generateGridImage(matrixShot, config, signal);
+        const splitPaths = await this.splitGridImage(gridPath, shot.id, gridLayout);
 
         const dbShot = shotRepo.get(shot.id);
         if (!dbShot) throw new Error(`Shot not found: ${shot.id}`);
+
+        const history = this.parseJson<ShotHistoryItem[]>(dbShot.history_json, []);
+        const nextHistoryEntry: ShotHistoryItem = {
+          timestamp: Date.now(),
+          imageUrl: gridPath,
+          gridLayout,
+          splitImages: splitPaths,
+          prompts: matrixPrompts,
+          videoUrls: Array(cellCount).fill(null),
+        };
+        const nextHistory = [nextHistoryEntry, ...history].slice(0, 20);
+
         shotRepo.upsert({
           ...dbShot,
+          matrix_prompts_json: JSON.stringify(serializeMatrixPromptPayload(matrixPrompts, gridLayout)),
           generated_image_path: gridPath,
           split_images_json: JSON.stringify(splitPaths),
+          video_urls_json: JSON.stringify(Array(cellCount).fill(null)),
+          video_status_json: JSON.stringify(Array(cellCount).fill('idle')),
+          animatic_video_path: null,
+          history_json: JSON.stringify(nextHistory),
           updated_at: Date.now(),
         });
 
-        task.result_json = JSON.stringify({ path: gridPath, splitPaths });
+        task.result_json = JSON.stringify({ path: gridPath, splitPaths, gridLayout });
         return;
       }
       case 'VIDEO_GEN': {
@@ -139,26 +168,28 @@ export class TaskRunner {
     }
   }
 
-  private async splitGridImage(gridPath: string, shotId: string): Promise<string[]> {
+  private async splitGridImage(gridPath: string, shotId: string, gridLayout: GridLayout): Promise<string[]> {
     const image = sharp(gridPath);
     const metadata = await image.metadata();
     const width = metadata.width;
     const height = metadata.height;
     if (!width || !height) throw new Error('Grid image has no dimensions');
 
-    const cellWidth = Math.floor(width / 3);
-    const cellHeight = Math.floor(height / 3);
+    const rows = Math.max(1, gridLayout.rows);
+    const cols = Math.max(1, gridLayout.cols);
+    const cellWidth = Math.floor(width / cols);
+    const cellHeight = Math.floor(height / rows);
     const { outputDir } = getAihubmixEnv();
     await fs.mkdir(path.join(outputDir, 'images'), { recursive: true });
 
     const tiles: Array<{ index: number; left: number; top: number; width: number; height: number }> = [];
-    for (let row = 0; row < 3; row += 1) {
-      for (let col = 0; col < 3; col += 1) {
+    for (let row = 0; row < rows; row += 1) {
+      for (let col = 0; col < cols; col += 1) {
         const left = col * cellWidth;
         const top = row * cellHeight;
-        const extractWidth = col === 2 ? width - left : cellWidth;
-        const extractHeight = row === 2 ? height - top : cellHeight;
-        const index = row * 3 + col + 1;
+        const extractWidth = col === cols - 1 ? width - left : cellWidth;
+        const extractHeight = row === rows - 1 ? height - top : cellHeight;
+        const index = row * cols + col + 1;
         tiles.push({ index, left, top, width: extractWidth, height: extractHeight });
       }
     }
@@ -191,15 +222,21 @@ export class TaskRunner {
     const dbShot = shotRepo.get(shotId);
     if (!dbShot) throw new Error(`Shot not found: ${shotId}`);
     const updated = { ...dbShot, updated_at: Date.now() };
+    const matrixPayload = this.parseJson<unknown>(updated.matrix_prompts_json, null);
+    const parsedMatrix = parseMatrixPromptPayload(matrixPayload);
+    const gridLayout = normalizeGridLayout(parsedMatrix.gridLayout);
+    const cellCount = getGridCellCount(gridLayout);
 
     if (inputMode === 'IMAGE_FIRST_FRAME') {
       if (typeof angleIndex !== 'number') throw new Error('IMAGE_FIRST_FRAME requires angleIndex');
-      const urls = this.parseJson<(string | null)[]>(updated.video_urls_json, Array(9).fill(null));
+      const urls = this.parseJson<(string | null)[]>(updated.video_urls_json, Array(cellCount).fill(null));
       const nextUrls = [...urls];
+      while (nextUrls.length <= angleIndex) nextUrls.push(null);
       nextUrls[angleIndex] = videoPath;
       updated.video_urls_json = JSON.stringify(nextUrls);
-      const statuses = this.parseJson<string[]>(updated.video_status_json, Array(9).fill('idle'));
+      const statuses = this.parseJson<string[]>(updated.video_status_json, Array(cellCount).fill('idle'));
       const nextStatuses = [...statuses];
+      while (nextStatuses.length <= angleIndex) nextStatuses.push('idle');
       nextStatuses[angleIndex] = 'completed';
       updated.video_status_json = JSON.stringify(nextStatuses);
     } else if (inputMode === 'MATRIX_FRAME') {

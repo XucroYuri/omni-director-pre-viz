@@ -5,6 +5,7 @@ import { app } from 'electron';
 import archiver = require('archiver');
 import type { ExportOptions, ExportResult, Manifest, ManifestShot } from '../../shared/types';
 import { resolveMediaRefToFilePath } from './mediaService';
+import { getGridCellCount, normalizeGridLayout } from '../../shared/utils';
 
 function parseDataUri(dataUri: string) {
   const match = dataUri.match(/^data:([^;]+);base64,(.+)$/);
@@ -96,7 +97,12 @@ export async function exportEpisode(options: ExportOptions): Promise<ExportResul
         }
       }
 
-      const videoFilenames: (string | null)[] = Array(9).fill(null);
+      const dynamicCellCount = Math.max(
+        getGridCellCount(normalizeGridLayout(shot.gridLayout)),
+        shot.videoUrls?.length || 0,
+        shot.splitImages?.length || 0,
+      );
+      const videoFilenames: (string | null)[] = Array(dynamicCellCount).fill(null);
       let animaticFilename: string | null = null;
       let assetVideoFilename: string | null = null;
 

@@ -28,6 +28,81 @@ body {
   overflow: hidden;
 }
 
+[data-theme-mode='light'] {
+  color-scheme: light;
+}
+
+[data-theme-mode='light'] body {
+  background-color: #f3f6fb;
+  color: #0f172a;
+}
+
+[data-theme-mode='light'] [class*='bg-[#0f1115]'],
+[data-theme-mode='light'] [class*='bg-[#0d0f13]'] {
+  background-color: #f3f6fb !important;
+}
+
+[data-theme-mode='light'] [class*='bg-[#16191f]'],
+[data-theme-mode='light'] [class*='bg-[#121722]'],
+[data-theme-mode='light'] [class*='bg-[#12151c]'],
+[data-theme-mode='light'] [class*='bg-[#11151d]'],
+[data-theme-mode='light'] [class*='bg-[#10141a]'],
+[data-theme-mode='light'] [class*='bg-[#10131a]'],
+[data-theme-mode='light'] [class*='bg-[#0f131d]'],
+[data-theme-mode='light'] [class*='bg-[#141821]'],
+[data-theme-mode='light'] [class*='bg-[#151922]'],
+[data-theme-mode='light'] [class*='bg-[#1c2027]'] {
+  background-color: #ffffff !important;
+}
+
+[data-theme-mode='light'] [class*='border-white/10'] {
+  border-color: rgba(15, 23, 42, 0.14) !important;
+}
+
+[data-theme-mode='light'] [class*='border-white/5'] {
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+[data-theme-mode='light'] [class*='bg-black/30'] {
+  background-color: rgba(148, 163, 184, 0.14) !important;
+}
+
+[data-theme-mode='light'] [class*='bg-black/40'] {
+  background-color: rgba(148, 163, 184, 0.2) !important;
+}
+
+[data-theme-mode='light'] [class*='bg-black/60'] {
+  background-color: rgba(71, 85, 105, 0.45) !important;
+}
+
+[data-theme-mode='light'] [class*='text-slate-100'] {
+  color: #0f172a !important;
+}
+
+[data-theme-mode='light'] [class*='text-slate-200'] {
+  color: #1e293b !important;
+}
+
+[data-theme-mode='light'] [class*='text-slate-300'] {
+  color: #334155 !important;
+}
+
+[data-theme-mode='light'] [class*='text-slate-400'] {
+  color: #475569 !important;
+}
+
+[data-theme-mode='light'] [class*='text-slate-500'] {
+  color: #64748b !important;
+}
+
+[data-theme-mode='light'] [class*='text-slate-600'] {
+  color: #94a3b8 !important;
+}
+
+[data-theme-mode='light'] [class*='placeholder:text-slate-700']::placeholder {
+  color: #94a3b8 !important;
+}
+
 ::-webkit-scrollbar {
   width: 4px;
   height: 4px;
@@ -59,4 +134,3 @@ body {
     opacity: 0;
   }
 }
-

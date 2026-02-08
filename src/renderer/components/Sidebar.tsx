@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { GlobalConfig, Shot } from '@shared/types';
+import { getGridCellCount, normalizeGridLayout } from '@shared/utils';
 import { 
   Plus, User, Database, Sparkles, Loader2,
   ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen, Trash2, Box, Map,
@@ -43,7 +44,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   isLoading, script, setScript, handleBreakdown, episodeId, isElectronRuntime, notify,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
-  const [editorTab, setEditorTab] = useState<'script' | 'timeline'>('script');
+  const [editorTab, setEditorTab] = useState<'script' | 'timeline' | 'visuals'>('script');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [sortOption, setSortOption] = useState<SortOption>('newest');
@@ -64,6 +65,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       shadow: 'shadow-indigo-500/20',
       linkedCard: 'border-indigo-400 ring-1 ring-indigo-400/30 shadow-[0_0_20px_rgba(var(--indigo-rgb),0.25)]',
       badgeBg: 'bg-indigo-500',
+      linkedPill: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/10',
     },
     amber: {
       text: 'text-amber-400',
@@ -72,6 +74,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       shadow: 'shadow-amber-500/20',
       linkedCard: 'border-amber-400 ring-1 ring-amber-400/30 shadow-[0_0_20px_rgba(var(--amber-rgb),0.25)]',
       badgeBg: 'bg-amber-500',
+      linkedPill: 'bg-amber-500/20 text-amber-300 border-amber-500/10',
     },
     emerald: {
       text: 'text-emerald-400',
@@ -80,6 +83,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       shadow: 'shadow-emerald-500/20',
       linkedCard: 'border-emerald-400 ring-1 ring-emerald-400/30 shadow-[0_0_20px_rgba(var(--emerald-rgb),0.25)]',
       badgeBg: 'bg-emerald-500',
+      linkedPill: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/10',
     },
   } as const;
 
@@ -358,7 +362,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex items-center gap-2">
                <span className={`text-[8px] font-black uppercase tracking-wider ${theme.text}`}>{label}</span>
                {item.tags?.includes('Auto-Scan') && <span className="text-[7px] px-1 bg-indigo-500/20 text-indigo-300 rounded-sm font-bold border border-indigo-500/10">已同步</span>}
-               {isLinkedToShot && <span className={`text-[7px] px-1 bg-${colorKey}-500/20 text-${colorKey}-300 rounded-sm font-bold border border-${colorKey}-500/10`}>已绑定</span>}
+               {isLinkedToShot && <span className={`text-[7px] px-1 rounded-sm font-bold border ${theme.linkedPill}`}>已绑定</span>}
             </div>
           </div>
           
@@ -433,6 +437,13 @@ const Sidebar: React.FC<SidebarProps> = ({
     return { c: process(config.characters), s: process(config.scenes), p: process(config.props) };
   }, [config, searchTerm, selectedTags, sortOption]);
 
+  const visualRefCount = config.characters.length + config.scenes.length + config.props.length;
+  const visualCategories = [
+    { key: 'characters', label: '角色参考', color: 'indigo' as const, items: filtered.c, prefix: '角色', Icon: User },
+    { key: 'scenes', label: '场景参考', color: 'amber' as const, items: filtered.s, prefix: '场景', Icon: Map },
+    { key: 'props', label: '道具参考', color: 'emerald' as const, items: filtered.p, prefix: '道具', Icon: Box },
+  ];
+
   const canRunBreakdown = isElectronRuntime && !isLoading && Boolean(script.trim());
   const breakdownDisabledReason = !isElectronRuntime
     ? '脚本拆解仅在 Electron 桌面端可用。'
@@ -454,40 +465,50 @@ const Sidebar: React.FC<SidebarProps> = ({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
+      <div className="flex-1 flex flex-col min-h-0">
         {!collapsed && (
           <>
-            {/* 脚本/时间线抽屉切换 */}
-            <div className="border-b border-white/10 bg-[#16191f]/40 shrink-0">
-              <div className="p-2 border-b border-white/10 bg-black/30 grid grid-cols-2 gap-2">
+            <div className="flex-1 flex flex-col min-h-0 border-b border-white/10 bg-[#16191f]/40">
+              <div className="p-2 border-b border-white/10 bg-black/30 grid grid-cols-3 gap-2">
                 <button
                   onClick={() => setEditorTab('script')}
-                  className={`h-9 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-2 ${
+                  className={`h-9 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-1.5 ${
                     editorTab === 'script'
                       ? 'bg-indigo-600 text-white'
                       : 'bg-white/5 text-slate-300 hover:text-white'
                   }`}
                 >
                   <FileText size={13} />
-                  脚本编辑
+                  剧本
                 </button>
                 <button
                   onClick={() => setEditorTab('timeline')}
-                  className={`h-9 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-2 ${
+                  className={`h-9 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-1.5 ${
                     editorTab === 'timeline'
                       ? 'bg-indigo-600 text-white'
                       : 'bg-white/5 text-slate-300 hover:text-white'
                   }`}
                 >
                   <ScrollText size={13} />
-                  镜头时间线
+                  分镜
+                </button>
+                <button
+                  onClick={() => setEditorTab('visuals')}
+                  className={`h-9 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-1.5 ${
+                    editorTab === 'visuals'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-white/5 text-slate-300 hover:text-white'
+                  }`}
+                >
+                  <LayoutGrid size={13} />
+                  美术
                 </button>
               </div>
 
-              {editorTab === 'script' ? (
-                <div className="p-4">
+              {editorTab === 'script' && (
+                <div className="flex-1 min-h-0 p-3 flex flex-col">
                   <textarea
-                    className="h-52 w-full bg-transparent text-[12px] leading-relaxed text-slate-200 outline-none resize-none placeholder:text-slate-700 font-medium"
+                    className="flex-1 min-h-[220px] w-full bg-transparent text-[12px] leading-relaxed text-slate-200 outline-none resize-none placeholder:text-slate-700 font-medium"
                     value={script}
                     onChange={(e) => setScript(e.target.value)}
                     placeholder="在此粘贴剧本文本，开始 AI 拆解..."
@@ -498,17 +519,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </p>
                   ) : null}
                 </div>
-              ) : (
-                <div className="max-h-72 overflow-y-auto custom-scrollbar p-2 space-y-1.5">
+              )}
+
+              {editorTab === 'timeline' && (
+                <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-1.5 space-y-1">
                   {shots.length === 0 ? (
                     <div className="h-24 flex flex-col items-center justify-center text-center p-6 space-y-3">
                       <Terminal size={24} className="text-slate-800 opacity-50" />
-                      <span className="text-[9px] font-bold text-slate-700 uppercase">等待脚本拆解</span>
+                      <span className="text-[9px] font-bold text-slate-700">等待脚本拆解</span>
                     </div>
                   ) : (
                     shots.map((shot) => {
                       const hasAssets = (shot.characterIds?.length || 0) + (shot.sceneIds?.length || 0) + (shot.propIds?.length || 0) > 0;
-                      const hasPrompts = (shot.matrixPrompts?.length || 0) >= 9;
+                      const hasPrompts = (shot.matrixPrompts?.length || 0) >= getGridCellCount(normalizeGridLayout(shot.gridLayout));
                       const isRendered = !!shot.generatedImageUrl;
                       const isSelected = selectedShotId === shot.id;
 
@@ -516,23 +539,29 @@ const Sidebar: React.FC<SidebarProps> = ({
                         <div
                           key={shot.id}
                           onClick={() => setSelectedShotId(shot.id)}
-                          className={`group p-3 rounded-lg cursor-pointer transition-all border relative overflow-hidden ${isSelected ? 'bg-indigo-500/15 border-indigo-400/50 shadow-inner' : 'bg-transparent border-transparent hover:bg-white/5 hover:border-white/10'}`}
+                          className={`group px-2.5 py-2 rounded-md cursor-pointer transition-all border ${
+                            isSelected
+                              ? 'bg-indigo-500/15 border-indigo-400/50 shadow-inner'
+                              : 'bg-transparent border-transparent hover:bg-white/5 hover:border-white/10'
+                          }`}
                         >
-                          <div className="flex items-center justify-between mb-1 relative z-10">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-[10px] font-mono font-bold ${isSelected ? 'text-indigo-400' : 'text-slate-500'}`}>SH_{shot.id.substring(0, 4)}</span>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-[9px] font-mono font-bold ${isSelected ? 'text-indigo-300' : 'text-slate-500'}`}>SH_{shot.id.substring(0, 4)}</span>
+                                <span className={`text-[7px] font-black px-1 rounded ${isSelected ? 'bg-indigo-500 text-white' : 'bg-white/5 text-slate-600'}`}>{shot.contextTag}</span>
+                              </div>
+                              <p className={`mt-0.5 text-[10px] leading-snug line-clamp-1 font-medium ${isSelected ? 'text-slate-100' : 'text-slate-400'}`}>{shot.visualTranslation}</p>
                             </div>
-                            <div className="flex items-center gap-1.5">
-                              {shot.status === 'failed' && <AlertCircle size={10} className="text-red-500" />}
-                              {isRendered && <CheckCircle2 size={10} className="text-emerald-400" />}
-                              <span className={`text-[8px] font-black uppercase px-1 rounded ${isSelected ? 'bg-indigo-500 text-white' : 'bg-white/5 text-slate-600'}`}>{shot.contextTag}</span>
+                            <div className="flex items-center gap-1 shrink-0 pt-0.5">
+                              {shot.status === 'failed' && <AlertCircle size={9} className="text-red-500" />}
+                              {isRendered && <CheckCircle2 size={9} className="text-emerald-400" />}
                             </div>
                           </div>
-                          <p className={`text-[11px] leading-snug line-clamp-1 font-medium relative z-10 ${isSelected ? 'text-slate-100' : 'text-slate-400'}`}>{shot.visualTranslation}</p>
-                          <div className="absolute bottom-0 left-0 w-full h-[2px] flex">
-                            <div className={`h-full transition-all duration-500 ${hasAssets ? 'bg-emerald-500 w-1/3' : 'bg-white/5 w-1/3'}`} />
-                            <div className={`h-full transition-all duration-500 ${hasPrompts ? 'bg-indigo-500 w-1/3' : 'bg-white/5 w-1/3'}`} />
-                            <div className={`h-full transition-all duration-500 ${isRendered ? 'bg-white w-1/3' : 'bg-white/5 w-1/3'}`} />
+                          <div className="mt-1 flex items-center gap-1">
+                            <span className={`inline-flex items-center justify-center min-w-4 h-4 rounded text-[7px] font-black ${hasAssets ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/5 text-slate-600 border border-white/5'}`}>资</span>
+                            <span className={`inline-flex items-center justify-center min-w-4 h-4 rounded text-[7px] font-black ${hasPrompts ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' : 'bg-white/5 text-slate-600 border border-white/5'}`}>词</span>
+                            <span className={`inline-flex items-center justify-center min-w-4 h-4 rounded text-[7px] font-black ${isRendered ? 'bg-slate-200/30 text-slate-100 border border-slate-300/40' : 'bg-white/5 text-slate-600 border border-white/5'}`}>图</span>
                           </div>
                         </div>
                       );
@@ -540,65 +569,77 @@ const Sidebar: React.FC<SidebarProps> = ({
                   )}
                 </div>
               )}
-            </div>
 
-            {/* 资产库搜索排序模块 */}
-            <div className="p-4 space-y-5">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="relative group flex-1">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-indigo-400" />
-                    <input 
-                      type="text" 
-                      placeholder="搜索资产..." 
-                      className="w-full bg-black/40 border border-white/10 rounded-lg py-2 pl-9 pr-3 text-[11px] outline-none text-slate-200 focus:border-indigo-500/50 focus:bg-white/5" 
-                      value={searchTerm} 
-                      onChange={(e) => setSearchTerm(e.target.value)} 
-                    />
+              {editorTab === 'visuals' && (
+                <div className="flex-1 min-h-0 p-3 flex flex-col gap-3">
+                  <div className="rounded-lg border border-white/10 bg-[#11151d] px-3 py-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black text-slate-200 tracking-widest">美术参考</span>
+                      <span className="text-[9px] text-slate-500">共 {visualRefCount} 项</span>
+                    </div>
+                    <p className="mt-2 text-[10px] text-slate-400 leading-relaxed">
+                      维护镜头所需的角色、场景和道具参考，供中间画布快速绑定。
+                    </p>
                   </div>
-                  <div className="flex gap-1">
-                    <button onClick={handleExport} className="p-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-indigo-400 rounded-lg transition-all border border-white/5"><Download size={14} /></button>
-                    <button onClick={() => fileInputRef.current?.click()} className="p-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-amber-400 rounded-lg transition-all border border-white/5"><Upload size={14} /></button>
-                    <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleImport} />
-                  </div>
-                </div>
-              </div>
 
-              {pendingDelete && (
-                <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 flex items-center justify-between gap-3">
-                  <div className="text-[10px] text-amber-200 truncate">
-                    已删除 <span className="font-bold">{pendingDelete.item.name}</span>，可撤销。
+                  <div className="flex items-center gap-2">
+                    <div className="relative group flex-1">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-indigo-400" />
+                      <input
+                        type="text"
+                        placeholder="搜索美术参考..."
+                        className="w-full bg-black/40 border border-white/10 rounded-lg py-2 pl-9 pr-3 text-[11px] outline-none text-slate-200 focus:border-indigo-500/50 focus:bg-white/5"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex gap-1">
+                      <button onClick={handleExport} className="p-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-indigo-400 rounded-lg transition-all border border-white/5" title="导出美术参考库"><Download size={14} /></button>
+                      <button onClick={() => fileInputRef.current?.click()} className="p-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-amber-400 rounded-lg transition-all border border-white/5" title="导入美术参考库"><Upload size={14} /></button>
+                      <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleImport} />
+                    </div>
                   </div>
-                  <button
-                    onClick={handleUndoDelete}
-                    className="h-7 px-2 rounded-md bg-amber-400/20 border border-amber-300/40 text-amber-100 hover:bg-amber-300/30 text-[9px] font-black uppercase tracking-widest shrink-0"
-                  >
-                    撤销
-                  </button>
+
+                  <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-3 pr-1">
+                    {pendingDelete && (
+                      <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 flex items-center justify-between gap-3">
+                        <div className="text-[10px] text-amber-200 truncate">
+                          已删除 <span className="font-bold">{pendingDelete.item.name}</span>，可撤销。
+                        </div>
+                        <button
+                          onClick={handleUndoDelete}
+                          className="h-7 px-2 rounded-md bg-amber-400/20 border border-amber-300/40 text-amber-100 hover:bg-amber-300/30 text-[9px] font-black uppercase tracking-widest shrink-0"
+                        >
+                          撤销
+                        </button>
+                      </div>
+                    )}
+
+                    {visualCategories.map((cat) => (
+                      <section key={cat.key} className="rounded-lg border border-white/10 bg-white/[0.02] px-2 py-2">
+                        <div className="flex items-center justify-between mb-2 px-1">
+                          <div className="flex items-center gap-2 cursor-pointer group" onClick={() => toggle(cat.key as keyof typeof expanded)}>
+                            <cat.Icon size={12} className={cat.color === 'indigo' ? 'text-indigo-400' : cat.color === 'amber' ? 'text-amber-400' : 'text-emerald-400'} />
+                            <span className="text-[10px] font-black text-slate-300 tracking-widest">{cat.label}</span>
+                            <span className="text-[9px] text-slate-500">({cat.items.length})</span>
+                          </div>
+                          <button onClick={() => addItem(cat.key as any, cat.prefix)} className="p-1.5 bg-white/5 hover:bg-white/15 rounded-md border border-white/5 text-slate-400 hover:text-white transition-all" title={`新增${cat.prefix}`}><Plus size={14} /></button>
+                        </div>
+                        {expanded[cat.key as keyof typeof expanded] && (
+                          <div className="space-y-3 px-1">
+                            {cat.items.map((i) => <AssetCard key={i.id} item={i} type={cat.key as any} label={cat.prefix} colorKey={cat.color as any} />)}
+                          </div>
+                        )}
+                      </section>
+                    ))}
+                    {visualCategories.every((cat) => cat.items.length === 0) && (
+                      <div className="h-24 rounded-lg border border-dashed border-white/10 flex items-center justify-center text-[10px] text-slate-500">
+                        暂无美术参考，点击分类右侧 + 新增
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
-
-              {[
-                { key: 'characters', label: '角色', color: 'indigo', items: filtered.c, prefix: '角色' },
-                { key: 'scenes', label: '场景', color: 'amber', items: filtered.s, prefix: '场景' },
-                { key: 'props', label: '道具', color: 'emerald', items: filtered.p, prefix: '道具' }
-              ].map(cat => (
-                <section key={cat.key}>
-                  <div className={`flex items-center justify-between mb-4`}>
-                    <div className="flex items-center gap-2 cursor-pointer group" onClick={() => toggle(cat.key as any)}>
-                      <div className={`w-2 h-2 rounded-full ${themeMap[cat.color as 'indigo'].bg}`} />
-                      <span className="text-[10px] font-black text-slate-400 tracking-widest">{cat.label} ({cat.items.length})</span>
-                    </div>
-                    <button onClick={() => addItem(cat.key as any, cat.prefix)} className="p-1.5 bg-white/5 hover:bg-white/15 rounded-md border border-white/5 text-slate-400 hover:text-white transition-all"><Plus size={14}/></button>
-                  </div>
-                  {expanded[cat.key as keyof typeof expanded] && (
-                    <div className="space-y-4">
-                      {cat.items.map(i => <AssetCard key={i.id} item={i} type={cat.key as any} label={cat.prefix} colorKey={cat.color as any} />)}
-                    </div>
-                  )}
-                </section>
-              ))}
-
             </div>
           </>
         )}

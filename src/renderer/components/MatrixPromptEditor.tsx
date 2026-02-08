@@ -1,20 +1,27 @@
-
-import React, { useRef, useState, useEffect } from 'react';
-import { DBTask, Shot, GlobalConfig, Character, Scene, Prop, ShotHistoryItem } from '@shared/types';
-import { 
-  Zap, RefreshCw, Wand2, Maximize2, User, Info, Check, X, Plus,
-  Monitor, Layout, Layers, Box, Camera, Target, Map, Clock, History, Upload,
-  UserPlus, MapPin, PackagePlus, Download, FileJson, Sparkles, Loader2,
-  ScanSearch, Undo2, Redo2, BoxSelect, Columns, Layers2, Lightbulb,
-  ShieldCheck, AlertTriangle, Search, Link2, Unlink, Package, Map as MapIcon,
-  CheckCircle2, ChevronRight, Wand, Play, Film, Video
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { DBTask, Shot, GlobalConfig, Character, Scene, Prop } from '@shared/types';
+import { ensurePromptListLength, getAngleLabel, getGridCellCount, normalizeGridLayout, normalizeIndexedList } from '@shared/utils';
+import {
+  AlertTriangle,
+  Box,
+  Camera,
+  Check,
+  Clock3,
+  Download,
+  Film,
+  History,
+  Layout,
+  Loader2,
+  Map as MapIcon,
+  Maximize2,
+  Sparkles,
+  User,
+  Video,
+  Wand2,
+  X,
 } from 'lucide-react';
-// Removed suggestIndividualPrompt and deconstructPrompt as they are not exported or used.
-import { 
-  enhanceAssetDescription, 
-  discoverMissingAssets,
-  generateMatrixPrompts
-} from '../services/geminiService';
+import { discoverMissingAssets, generateMatrixPrompts } from '../services/geminiService';
+import { splitGridImageByCanvas } from '../utils/imageUtils';
 
 interface MatrixPromptEditorProps {
   shot: Shot;
@@ -38,16 +45,70 @@ interface MatrixPromptEditorProps {
   isRebuildingCache?: boolean;
 }
 
-const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({ 
-  shot, allShots, config, episodeId, onUpdateConfig, onUpdatePrompts, onUpdateShot, onGenerateImage, onRestoreHistory, 
-  onAddGlobalAsset, onDeleteGlobalAsset, onUpdateGlobalAsset, onOptimizePrompts, 
-  onAutoLinkAssets, isGeneratingImage, isOptimizing, isAutoLinking,
-  isRebuildingCache
+type AssetCollectionKey = 'characterIds' | 'sceneIds' | 'propIds';
+type ShotVideoStatus = NonNullable<Shot['videoStatus']>[number];
+
+const VIDEO_STATUS_TEXT: Record<ShotVideoStatus, string> = {
+  idle: '待命',
+  queued: '排队',
+  processing: '处理中',
+  downloading: '下载中',
+  completed: '完成',
+  failed: '失败',
+};
+
+const ACCENT_STYLES = {
+  indigo: {
+    active: 'border-indigo-400 ring-4 ring-indigo-400/30 scale-110 z-10',
+    fallbackBg: 'bg-indigo-500/10',
+    fallbackText: 'text-indigo-400',
+    fallbackSubtext: 'text-indigo-500',
+    activeOverlay: 'bg-indigo-500/20',
+    activeBadge: 'bg-indigo-500',
+  },
+  amber: {
+    active: 'border-amber-400 ring-4 ring-amber-400/30 scale-110 z-10',
+    fallbackBg: 'bg-amber-500/10',
+    fallbackText: 'text-amber-400',
+    fallbackSubtext: 'text-amber-500',
+    activeOverlay: 'bg-amber-500/20',
+    activeBadge: 'bg-amber-500',
+  },
+  emerald: {
+    active: 'border-emerald-400 ring-4 ring-emerald-400/30 scale-110 z-10',
+    fallbackBg: 'bg-emerald-500/10',
+    fallbackText: 'text-emerald-400',
+    fallbackSubtext: 'text-emerald-500',
+    activeOverlay: 'bg-emerald-500/20',
+    activeBadge: 'bg-emerald-500',
+  },
+} as const;
+
+const GRID_VALUES = [1, 2, 3, 4, 5] as const;
+
+const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
+  shot,
+  config,
+  episodeId,
+  onUpdateConfig,
+  onUpdatePrompts,
+  onUpdateShot,
+  onGenerateImage,
+  onRestoreHistory,
+  onAddGlobalAsset,
+  onUpdateGlobalAsset,
+  onOptimizePrompts,
+  onAutoLinkAssets,
+  isGeneratingPrompts,
+  isGeneratingImage,
+  isOptimizing,
+  isAutoLinking,
 }) => {
   const shotRef = useRef(shot);
-  const [showHistory, setShowHistory] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
-  const [discoveredAssets, setDiscoveredAssets] = useState<any[]>([]);
+  const videoTimersRef = useRef<
+    Record<number, { processing?: ReturnType<typeof setTimeout>; downloading?: ReturnType<typeof setTimeout> }>
+  >({});
+
   const [isPromptingAll, setIsPromptingAll] = useState(false);
   const [activePreviewIndex, setActivePreviewIndex] = useState<number | null>(null);
   const [videoModalIndex, setVideoModalIndex] = useState<number | null>(null);
@@ -58,96 +119,237 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
   const [isGeneratingAssetVideo, setIsGeneratingAssetVideo] = useState(false);
   const [showAssetVideoPreview, setShowAssetVideoPreview] = useState(false);
   const [showRenderSettings, setShowRenderSettings] = useState(true);
-  const videoTimersRef = useRef<Record<number, { processing?: ReturnType<typeof setTimeout>; downloading?: ReturnType<typeof setTimeout> }>>({});
-
-  const prompts = shot.matrixPrompts || Array(9).fill('');
-  const camNames = ['全景 (EST)', '过肩 (OTS)', '特写 (CU)', '中景 (MS)', '仰拍 (LOW)', '俯拍 (HI)', '侧面 (SIDE)', '极特写 (ECU)', '斜角 (DUTCH)'];
-  const boundCharacters = config.characters.filter((c) => shot.characterIds?.includes(c.id));
-  const boundScenes = config.scenes.filter((s) => shot.sceneIds?.includes(s.id));
-  const boundProps = config.props.filter((p) => shot.propIds?.includes(p.id));
-  const hasBoundAssets = boundCharacters.length + boundScenes.length + boundProps.length > 0;
-  const hasAssetRefs =
-    boundCharacters.some((c) => c.refImage) || boundScenes.some((s) => s.refImage) || boundProps.some((p) => p.refImage);
-  const hasPromptContent = prompts.some((prompt) => prompt.trim().length > 0);
-  const hasAnimaticOutput = Boolean(shot.animaticVideoUrl);
-  const hasAssetVideoOutput = Boolean(shot.assetVideoUrl);
-  const canGenerateAnimatic = hasAnimaticOutput || (Boolean(shot.generatedImageUrl) && !isGeneratingAnimatic);
-  const canGenerateAssetVideo = hasAssetVideoOutput || (hasBoundAssets && hasAssetRefs && !isGeneratingAssetVideo);
-  const canDownloadAll = Boolean(shot.splitImages?.length);
-  const canRenderMatrix = hasPromptContent && !isGeneratingImage;
-
-  const animaticDisabledReason = hasAnimaticOutput
-    ? ''
-    : !shot.generatedImageUrl
-    ? '请先渲染矩阵母图，再生成 Animatic。'
-    : isGeneratingAnimatic
-      ? 'Animatic 正在生成。'
-      : '';
-
-  const assetVideoDisabledReason = hasAssetVideoOutput
-    ? ''
-    : !hasBoundAssets
-    ? '请先绑定至少一个角色、场景或道具。'
-    : !hasAssetRefs
-      ? '请先为已绑定资产上传参考图。'
-      : isGeneratingAssetVideo
-        ? '资产视频正在生成。'
-        : '';
-
-  const downloadDisabledReason = !shot.splitImages?.length ? '母图切片未完成，暂无可下载子图。' : '';
-  const renderDisabledReason = !hasPromptContent
-    ? '请先初始化矩阵 Prompt 或手动填写至少一个机位提示词。'
-    : isGeneratingImage
-      ? '矩阵母图正在渲染中。'
-      : '';
-
-  const inlineHints = [
-    !hasBoundAssets ? '未绑定资产：请先在角色/场景区绑定关键对象，避免生成失败。' : '',
-    !shot.generatedImageUrl && !hasAnimaticOutput ? 'Animatic 需要先渲染矩阵母图。' : '',
-    hasBoundAssets && !hasAssetRefs && !hasAssetVideoOutput ? '资产视频需要已绑定资产具备参考图。' : '',
-    !hasPromptContent ? '当前 Prompt 为空：请先初始化或手动填写。' : '',
-  ].filter(Boolean);
-
-  useEffect(() => {
-    handleDiscoverAssets();
-  }, [shot.id]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [activeHistoryIndex, setActiveHistoryIndex] = useState(0);
+  const [discoveredAssets, setDiscoveredAssets] = useState<any[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+  const [canvasSplitImages, setCanvasSplitImages] = useState<string[]>([]);
+  const [isCanvasSlicing, setIsCanvasSlicing] = useState(false);
 
   useEffect(() => {
     shotRef.current = shot;
   }, [shot]);
 
-  const handlePromptChange = (i: number, val: string) => {
+  useEffect(() => {
+    setActiveHistoryIndex(0);
+    setShowHistory(false);
+    setActivePreviewIndex(null);
+    setVideoModalIndex(null);
+  }, [shot.id]);
+
+  const gridLayout = normalizeGridLayout(shot.gridLayout);
+  const cellCount = getGridCellCount(gridLayout);
+  const prompts = useMemo(() => ensurePromptListLength(shot.matrixPrompts, gridLayout), [shot.matrixPrompts, gridLayout]);
+  const splitImages = useMemo(
+    () => normalizeIndexedList<string>(shot.splitImages, cellCount, ''),
+    [shot.splitImages, cellCount],
+  );
+  const videoUrls = useMemo(
+    () => normalizeIndexedList<string | null>(shot.videoUrls, cellCount, null),
+    [shot.videoUrls, cellCount],
+  );
+  const videoStatus = useMemo(
+    () => normalizeIndexedList<ShotVideoStatus>(shot.videoStatus, cellCount, 'idle'),
+    [shot.videoStatus, cellCount],
+  );
+
+  const hasPersistedSlices = splitImages.some((item) => Boolean(item));
+  const displaySplitImages = hasPersistedSlices
+    ? splitImages
+    : normalizeIndexedList<string>(canvasSplitImages, cellCount, '');
+
+  useEffect(() => {
+    let active = true;
+    if (!shot.generatedImageUrl || hasPersistedSlices) {
+      setCanvasSplitImages([]);
+      setIsCanvasSlicing(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setIsCanvasSlicing(true);
+    splitGridImageByCanvas(shot.generatedImageUrl, gridLayout)
+      .then((slices) => {
+        if (!active) return;
+        setCanvasSplitImages(normalizeIndexedList<string>(slices, cellCount, ''));
+      })
+      .catch((error) => {
+        console.warn('Canvas split failed', error);
+        if (!active) return;
+        setCanvasSplitImages([]);
+      })
+      .finally(() => {
+        if (!active) return;
+        setIsCanvasSlicing(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [shot.generatedImageUrl, gridLayout.rows, gridLayout.cols, cellCount, hasPersistedSlices]);
+
+  const boundCharacters = config.characters.filter((item) => shot.characterIds?.includes(item.id));
+  const boundScenes = config.scenes.filter((item) => shot.sceneIds?.includes(item.id));
+  const boundProps = config.props.filter((item) => shot.propIds?.includes(item.id));
+
+  const hasBoundAssets = boundCharacters.length + boundScenes.length + boundProps.length > 0;
+  const hasAssetRefs =
+    boundCharacters.some((item) => item.refImage) ||
+    boundScenes.some((item) => item.refImage) ||
+    boundProps.some((item) => item.refImage);
+  const hasPromptContent = prompts.some((item) => item.trim().length > 0);
+  const hasSceneBinding = boundScenes.length > 0;
+
+  const canRenderMatrix = hasSceneBinding && hasPromptContent && !isGeneratingImage;
+  const canDownloadAll = displaySplitImages.some((item) => Boolean(item));
+  const canGenerateAnimatic = Boolean(shot.animaticVideoUrl) || (Boolean(shot.generatedImageUrl) && !isGeneratingAnimatic);
+  const canGenerateAssetVideo =
+    Boolean(shot.assetVideoUrl) || (hasBoundAssets && hasAssetRefs && !isGeneratingAssetVideo);
+
+  const inlineHints = [
+    !hasSceneBinding ? '未绑定场景：请在下方资产条至少绑定一个场景。' : '',
+    !hasPromptContent ? '当前提示词为空：先生成分镜提示词，或手动填写。' : '',
+    !shot.generatedImageUrl ? '尚未生成分镜网格图。' : '',
+    hasBoundAssets && !hasAssetRefs ? '资产已绑定但缺少参考图：建议补图后再生成资产视频。' : '',
+  ].filter(Boolean);
+
+  const renderDisabledReason = !hasSceneBinding
+    ? '请先绑定至少一个场景。'
+    : !hasPromptContent
+      ? '请先生成或填写提示词。'
+      : isGeneratingImage
+        ? '分镜网格图生成中。'
+        : '';
+
+  const animaticDisabledReason = shot.animaticVideoUrl
+    ? ''
+    : !shot.generatedImageUrl
+      ? '请先生成分镜网格图。'
+      : isGeneratingAnimatic
+        ? '镜头预演正在生成。'
+        : '';
+
+  const assetVideoDisabledReason = shot.assetVideoUrl
+    ? ''
+    : !hasBoundAssets
+      ? '请先绑定角色/场景/道具。'
+      : !hasAssetRefs
+        ? '请先为已绑定资产上传参考图。'
+        : isGeneratingAssetVideo
+          ? '资产视频正在生成。'
+          : '';
+
+  const historyItems = shot.history || [];
+
+  const assetRailSections: Array<{
+    key: AssetCollectionKey;
+    assetType: 'characters' | 'scenes' | 'props';
+    label: string;
+    accentColor: keyof typeof ACCENT_STYLES;
+    items: Array<Character | Scene | Prop>;
+    icon: React.ReactNode;
+  }> = [
+    {
+      key: 'characterIds',
+      assetType: 'characters',
+      label: '角色',
+      accentColor: 'indigo',
+      items: config.characters,
+      icon: <User size={12} className="text-indigo-400" />,
+    },
+    {
+      key: 'sceneIds',
+      assetType: 'scenes',
+      label: '场景',
+      accentColor: 'amber',
+      items: config.scenes,
+      icon: <MapIcon size={12} className="text-amber-400" />,
+    },
+    {
+      key: 'propIds',
+      assetType: 'props',
+      label: '道具',
+      accentColor: 'emerald',
+      items: config.props,
+      icon: <Box size={12} className="text-emerald-400" />,
+    },
+  ];
+
+  useEffect(() => {
+    if (!window.api?.ai?.discoverMissingAssets) {
+      setDiscoveredAssets([]);
+      return;
+    }
+    if (isScanning) return;
+    setIsScanning(true);
+    discoverMissingAssets(shot, config)
+      .then((findings) => {
+        const merged = [
+          ...findings.characters.map((item: any) => ({ ...item, type: 'characters' as const })),
+          ...findings.scenes.map((item: any) => ({ ...item, type: 'scenes' as const })),
+          ...findings.props.map((item: any) => ({ ...item, type: 'props' as const })),
+        ];
+        setDiscoveredAssets(merged);
+      })
+      .catch((error) => {
+        console.warn('discoverMissingAssets failed', error);
+      })
+      .finally(() => {
+        setIsScanning(false);
+      });
+  }, [shot.id, shot.visualTranslation, config.characters, config.scenes, config.props]);
+
+  const handlePromptChange = (index: number, value: string) => {
     const next = [...prompts];
-    next[i] = val;
+    next[index] = value;
     onUpdatePrompts(next);
+  };
+
+  const handleGridLayoutChange = (field: 'rows' | 'cols', value: number) => {
+    const nextLayout = normalizeGridLayout({ ...gridLayout, [field]: value });
+    const nextCellCount = getGridCellCount(nextLayout);
+    const nextPrompts = ensurePromptListLength(prompts, nextLayout);
+
+    setCanvasSplitImages([]);
+    onUpdateShot({
+      gridLayout: nextLayout,
+      matrixPrompts: nextPrompts,
+      generatedImageUrl: undefined,
+      splitImages: [],
+      videoUrls: Array(nextCellCount).fill(null),
+      videoStatus: Array(nextCellCount).fill('idle'),
+      animaticVideoUrl: undefined,
+    });
   };
 
   const handleInitializeShot = async () => {
     setIsPromptingAll(true);
     try {
-      if (!shot.matrixPrompts || shot.matrixPrompts.length < 9) {
-        const generated = await generateMatrixPrompts(shot, config);
-        onUpdatePrompts(generated);
+      const current = ensurePromptListLength(shot.matrixPrompts, gridLayout);
+      const needsFreshGeneration = current.every((prompt) => !prompt?.trim());
+      const needsPatchGeneration = current.some((prompt) => !prompt?.trim());
+      if (!needsFreshGeneration && !needsPatchGeneration) return;
+
+      const generated = await generateMatrixPrompts({ ...shot, gridLayout, matrixPrompts: current }, config);
+      const normalizedGenerated = ensurePromptListLength(generated, gridLayout);
+
+      if (needsFreshGeneration) {
+        onUpdatePrompts(normalizedGenerated);
+        return;
       }
-    } catch (err) { console.error(err); } finally { setIsPromptingAll(false); }
+
+      const merged = current.map((prompt, index) => (prompt?.trim() ? prompt : normalizedGenerated[index] || ''));
+      onUpdatePrompts(merged);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsPromptingAll(false);
+    }
   };
 
-  const handleDiscoverAssets = async () => {
-    if (isScanning) return;
-    setIsScanning(true);
-    try {
-      const findings = await discoverMissingAssets(shot, config);
-      const combined = [
-        ...findings.characters.map((c: any) => ({ ...c, type: 'characters' as const })),
-        ...findings.scenes.map((s: any) => ({ ...s, type: 'scenes' as const })),
-        ...findings.props.map((p: any) => ({ ...p, type: 'props' as const }))
-      ];
-      setDiscoveredAssets(combined);
-    } catch (err) { console.error(err); } finally { setIsScanning(false); }
-  };
-
-  const setVideoStatus = (index: number, status: Shot['videoStatus'][number]) => {
-    const nextStatus = [...(shotRef.current.videoStatus || Array(9).fill('idle'))];
+  const setVideoStatus = (index: number, status: ShotVideoStatus) => {
+    const nextStatus = normalizeIndexedList<ShotVideoStatus>(shotRef.current.videoStatus, cellCount, 'idle');
     nextStatus[index] = status;
     onUpdateShot({ videoStatus: nextStatus });
   };
@@ -166,12 +368,20 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
       const status = shotRef.current.videoStatus?.[index];
       if (status === 'queued') setVideoStatus(index, 'processing');
     }, 800);
+
     const downloading = setTimeout(() => {
       const status = shotRef.current.videoStatus?.[index];
       if (status === 'queued' || status === 'processing') setVideoStatus(index, 'downloading');
     }, 12000);
+
     videoTimersRef.current[index] = { processing, downloading };
   };
+
+  useEffect(() => {
+    return () => {
+      Object.keys(videoTimersRef.current).forEach((key) => clearVideoTimers(Number(key)));
+    };
+  }, []);
 
   const submitVideoTask = async (payload: {
     inputMode: 'IMAGE_FIRST_FRAME' | 'MATRIX_FRAME' | 'ASSET_COLLAGE' | 'TEXT_ONLY';
@@ -186,6 +396,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
         : `task_${now}_${Math.random().toString(16).slice(2, 10)}`;
+
     const task: DBTask = {
       id: taskId,
       episode_id: episodeId,
@@ -207,9 +418,15 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     await window.api.app.task.submit(task);
   };
 
+  const openVideoModal = (index: number) => {
+    setVideoModalIndex(index);
+    setVideoPromptDraft(prompts[index] || shot.visualTranslation);
+    setSyncVideoPrompt(true);
+  };
+
   const handleCreateShotVideo = async (index: number, promptOverride?: string) => {
-    if (!shot.splitImages || !shot.splitImages[index]) return;
-    const status = shot.videoStatus?.[index];
+    if (!splitImages[index]) return;
+    const status = videoStatus[index];
     if (status === 'queued' || status === 'processing' || status === 'downloading') return;
 
     setVideoStatus(index, 'queued');
@@ -218,12 +435,12 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     try {
       const prompt = (promptOverride || prompts[index] || shot.visualTranslation).trim();
       await submitVideoTask({ inputMode: 'IMAGE_FIRST_FRAME', angleIndex: index, prompt });
-    } catch (err) {
-      console.error(err);
+    } catch (error) {
+      console.error(error);
       clearVideoTimers(index);
-      const finalStatus = [...(shotRef.current.videoStatus || Array(9).fill('idle'))];
-      finalStatus[index] = 'failed';
-      onUpdateShot({ videoStatus: finalStatus });
+      const nextStatus = normalizeIndexedList<ShotVideoStatus>(shotRef.current.videoStatus, cellCount, 'idle');
+      nextStatus[index] = 'failed';
+      onUpdateShot({ videoStatus: nextStatus });
     }
   };
 
@@ -232,90 +449,95 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     setIsGeneratingAnimatic(true);
     try {
       await submitVideoTask({ inputMode: 'MATRIX_FRAME' });
-    } catch (err) {
-      console.error(err);
+    } catch (error) {
+      console.error(error);
     } finally {
       setIsGeneratingAnimatic(false);
     }
   };
 
   const handleGenerateAssetVideo = async () => {
-    if (isGeneratingAssetVideo || !hasAssetRefs) return;
+    if (!hasAssetRefs || isGeneratingAssetVideo) return;
     setIsGeneratingAssetVideo(true);
     try {
       await submitVideoTask({ inputMode: 'ASSET_COLLAGE' });
-    } catch (err) {
-      console.error(err);
+    } catch (error) {
+      console.error(error);
     } finally {
       setIsGeneratingAssetVideo(false);
     }
   };
-  const openVideoModal = (index: number) => {
-    setVideoModalIndex(index);
-    setVideoPromptDraft(prompts[index] || shot.visualTranslation);
-    setSyncVideoPrompt(true);
-  };
 
   const handleBatchDownload = () => {
-    if (!shot.splitImages) return;
-    shot.splitImages.forEach((img, idx) => {
-      const a = document.createElement('a');
-      a.href = img;
-      a.download = `S_${shot.id.substring(0,4)}_${camNames[idx].split(' ')[0]}.png`;
-      a.click();
+    displaySplitImages.forEach((img, index) => {
+      if (!img) return;
+      const anchor = document.createElement('a');
+      anchor.href = img;
+      anchor.download = `S_${shot.id.substring(0, 4)}_${getAngleLabel(index)}.png`;
+      anchor.click();
     });
   };
 
-  const AssetBubble = ({ item, active, onUnlink, onUpload, accentColor, typeIcon }: any) => (
-    <div className="relative group/asset shrink-0">
-      <div 
-        onClick={() => !active && onUnlink()}
-        className={`w-11 h-11 rounded-full border-2 transition-all cursor-pointer overflow-hidden flex items-center justify-center relative ${
-          active 
-            ? `border-${accentColor}-400 ring-4 ring-${accentColor}-400/30 scale-110 z-10` 
-            : 'border-white/10 grayscale opacity-40 hover:opacity-100 hover:grayscale-0'
-        }`}
-      >
-        {item.refImage ? (
-          <img src={item.refImage} className="w-full h-full object-cover" />
-        ) : (
-          <div className={`w-full h-full flex flex-col items-center justify-center bg-${accentColor}-500/10 transition-colors`}>
-             <div className={`text-${accentColor}-400 mb-0.5`}>{typeIcon}</div>
-             <span className={`text-[6px] font-black text-${accentColor}-500 tracking-tighter uppercase`}>No Ref</span>
-          </div>
-        )}
-        {active && (
-          <div className={`absolute inset-0 bg-${accentColor}-500/20 flex items-center justify-center`}>
-            <div className={`bg-${accentColor}-500 text-white rounded-full p-1 shadow-2xl border border-white/20 transform scale-110`}>
-              <Check size={10} strokeWidth={4} />
-            </div>
-          </div>
-        )}
-        <label className="absolute inset-0 bg-black/70 opacity-0 group-hover/asset:opacity-100 flex items-center justify-center transition-opacity cursor-pointer z-10" onClick={(e) => e.stopPropagation()}>
-          <Camera size={16} className="text-white" />
-          <input type="file" accept="image/*" className="hidden" onChange={onUpload} />
-        </label>
-      </div>
-    </div>
-  );
+  const toggleAssetBinding = (collection: AssetCollectionKey, assetId: string) => {
+    const next = new Set(shot[collection] || []);
+    if (next.has(assetId)) {
+      next.delete(assetId);
+    } else {
+      next.add(assetId);
+    }
+    onUpdateShot({ [collection]: Array.from(next) } as Partial<Shot>);
+  };
 
-  const AssetChip = ({ label, tone }: { label: string; tone: 'indigo' | 'amber' | 'emerald' }) => (
-    <span
-      className={`px-2 py-0.5 rounded-full text-[9px] font-black tracking-widest border ${
-        tone === 'indigo'
-          ? 'border-indigo-400/40 text-indigo-300 bg-indigo-500/10'
-          : tone === 'amber'
-            ? 'border-amber-400/40 text-amber-300 bg-amber-500/10'
-            : 'border-emerald-400/40 text-emerald-300 bg-emerald-500/10'
-      }`}
-    >
-      {label}
-    </span>
-  );
+  const AssetBubble = ({ item, active, onToggle, onUpload, accentColor, typeIcon }: any) => {
+    const accent = ACCENT_STYLES[accentColor as keyof typeof ACCENT_STYLES] || ACCENT_STYLES.indigo;
+    return (
+      <div className="relative group/asset shrink-0">
+        <div
+          onClick={onToggle}
+          className={`w-11 h-11 rounded-full border-2 transition-all cursor-pointer overflow-hidden flex items-center justify-center relative ${
+            active ? accent.active : 'border-white/10 grayscale opacity-40 hover:opacity-100 hover:grayscale-0'
+          }`}
+          title={active ? `点击取消绑定 ${item.name}` : `点击绑定 ${item.name}`}
+        >
+          {item.refImage ? (
+            <img src={item.refImage} className="w-full h-full object-cover" />
+          ) : (
+            <div className={`w-full h-full flex flex-col items-center justify-center transition-colors ${accent.fallbackBg}`}>
+              <div className={`mb-0.5 ${accent.fallbackText}`}>{typeIcon}</div>
+              <span className={`text-[6px] font-black tracking-tighter uppercase ${accent.fallbackSubtext}`}>No Ref</span>
+            </div>
+          )}
+          {active && (
+            <div className={`absolute inset-0 flex items-center justify-center ${accent.activeOverlay}`}>
+              <div className={`text-white rounded-full p-1 shadow-2xl border border-white/20 transform scale-110 ${accent.activeBadge}`}>
+                <Check size={10} strokeWidth={4} />
+              </div>
+            </div>
+          )}
+          <label
+            className="absolute inset-0 bg-black/70 opacity-0 group-hover/asset:opacity-100 flex items-center justify-center transition-opacity cursor-pointer z-10"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <Camera size={16} className="text-white" />
+            <input type="file" accept="image/*" className="hidden" onChange={onUpload} />
+          </label>
+        </div>
+      </div>
+    );
+  };
+
+  const applyPromptOptimization = async () => {
+    if (isOptimizing) return;
+    await onOptimizePrompts();
+  };
+
+  const applyAutoLink = async () => {
+    if (isAutoLinking) return;
+    await onAutoLinkAssets();
+  };
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-[#0f1115]">
-      {/* 工具栏 */}
       <div className="border-b border-white/10 bg-[#16191f]/80 px-4 py-3 sm:px-6 shrink-0 backdrop-blur-md z-20 flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex flex-1 items-center gap-3 sm:gap-5">
           <div className="flex shrink-0 flex-col">
@@ -325,31 +547,53 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
           <div className="h-6 w-px bg-white/10 shrink-0" />
           <div className="min-w-0 flex flex-col">
             <span className="text-[9px] font-black text-slate-500 tracking-widest">视觉拆解</span>
-            <span className="text-[12px] text-slate-100 font-medium italic truncate max-w-full sm:max-w-[360px]">"{shot.visualTranslation}"</span>
+            <span className="text-[12px] text-slate-100 font-medium italic truncate max-w-full sm:max-w-[420px]">"{shot.visualTranslation}"</span>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setShowRenderSettings((prev) => !prev)}
-            className="h-9 px-3 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all"
+            className="h-9 w-9 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg transition-all flex items-center justify-center"
+            title={showRenderSettings ? '收起参数' : '展开参数'}
+            aria-label={showRenderSettings ? '收起参数' : '展开参数'}
           >
-            {showRenderSettings ? '收起参数' : '展开参数'}
+            <Layout size={14} />
           </button>
-          <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-lg px-2 h-9">
-            <span className="text-[9px] font-black tracking-widest text-slate-500">镜头类型</span>
-            <select
-              className="bg-transparent text-[10px] font-black tracking-widest text-slate-200 outline-none"
-              value={shot.shotKind || 'CHAR'}
-              onChange={(e) => onUpdateShot({ shotKind: e.target.value as Shot['shotKind'] })}
-            >
-              <option value="CHAR">角色 CHAR</option>
-              <option value="ENV">环境 ENV</option>
-              <option value="POV">主观 POV</option>
-              <option value="INSERT">插入 INSERT</option>
-              <option value="MIXED">混合 MIXED</option>
-            </select>
-          </div>
+
+          <button
+            onClick={() => setShowHistory((prev) => !prev)}
+            className={`h-9 px-3 rounded-lg border text-[10px] font-black tracking-widest transition-all flex items-center gap-2 ${
+              showHistory
+                ? 'bg-indigo-500/20 border-indigo-400/40 text-indigo-200'
+                : 'bg-white/5 border-white/10 text-slate-300 hover:text-white'
+            }`}
+            title="切换历史版本面板"
+          >
+            <History size={14} />
+            历史
+          </button>
+
+          <button
+            onClick={applyPromptOptimization}
+            disabled={isOptimizing}
+            className="h-9 px-3 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+            title="优化当前镜头提示词"
+          >
+            {isOptimizing ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+            优化
+          </button>
+
+          <button
+            onClick={applyAutoLink}
+            disabled={isAutoLinking}
+            className="h-9 px-3 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+            title="根据文本自动关联资产"
+          >
+            {isAutoLinking ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            关联资产
+          </button>
+
           <button
             onClick={() => {
               if (shot.animaticVideoUrl) {
@@ -360,11 +604,12 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             }}
             disabled={!canGenerateAnimatic}
             className="h-9 px-4 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
-            title={animaticDisabledReason}
+            title={animaticDisabledReason || '生成或查看镜头预演'}
           >
             {isGeneratingAnimatic ? <Loader2 size={14} className="animate-spin" /> : <Film size={14} />}
-            {shot.animaticVideoUrl ? '预览 Animatic' : '生成 Animatic'}
+            {shot.animaticVideoUrl ? '查看镜头预演' : '生成镜头预演'}
           </button>
+
           <button
             onClick={() => {
               if (shot.assetVideoUrl) {
@@ -375,74 +620,193 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             }}
             disabled={!canGenerateAssetVideo}
             className="h-9 px-4 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
-            title={assetVideoDisabledReason}
+            title={assetVideoDisabledReason || '生成或查看资产视频'}
           >
-            {isGeneratingAssetVideo ? <Loader2 size={14} className="animate-spin" /> : <Layers size={14} />}
-            {shot.assetVideoUrl ? '预览资产视频' : '生成资产视频'}
+            {isGeneratingAssetVideo ? <Loader2 size={14} className="animate-spin" /> : <Video size={14} />}
+            {shot.assetVideoUrl ? '查看资产视频' : '生成资产视频'}
           </button>
+
           <button
             onClick={handleBatchDownload}
             disabled={!canDownloadAll}
             className="h-9 px-4 bg-white/5 border border-white/10 text-slate-400 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
-            title={downloadDisabledReason}
+            title={!canDownloadAll ? '暂无可下载图像' : '下载当前网格切片'}
           >
-            <Download size={14} /> 下载全部
+            <Download size={14} /> 下载
           </button>
-          <div className="h-6 w-px bg-white/10 hidden md:block" />
-          <button onClick={handleInitializeShot} disabled={isPromptingAll || isAutoLinking} className={`h-9 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 shadow-lg ${isPromptingAll ? 'animate-pulse' : ''}`}>
-            {isPromptingAll ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-            初始化矩阵
+
+          <button
+            onClick={handleInitializeShot}
+            disabled={isPromptingAll || isGeneratingPrompts}
+            className={`h-9 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 shadow-lg ${
+              isPromptingAll || isGeneratingPrompts ? 'animate-pulse' : ''
+            }`}
+          >
+            {isPromptingAll || isGeneratingPrompts ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            分镜提示词
           </button>
+
           <button
             onClick={onGenerateImage}
             disabled={!canRenderMatrix}
             className="px-6 h-9 bg-slate-100 text-black hover:bg-indigo-500 hover:text-white disabled:opacity-20 rounded-lg text-[11px] font-black tracking-widest transition-all flex items-center gap-2 shadow-xl"
             title={renderDisabledReason}
           >
-            {isGeneratingImage ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} />}
-            渲染母图
+            {isGeneratingImage ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            分镜网格图
           </button>
         </div>
       </div>
 
+      {showHistory && (
+        <div className="border-b border-white/10 bg-[#121722] px-4 sm:px-6 py-3">
+          {historyItems.length === 0 ? (
+            <div className="text-[10px] text-slate-500">暂无历史版本。</div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              {historyItems.map((item, index) => {
+                const active = index === activeHistoryIndex;
+                const layout = normalizeGridLayout(item.gridLayout, gridLayout);
+                return (
+                  <button
+                    key={`${item.timestamp}-${index}`}
+                    onClick={() => setActiveHistoryIndex(index)}
+                    className={`px-3 py-1.5 rounded-lg border text-[10px] transition-all ${
+                      active
+                        ? 'bg-indigo-500/20 border-indigo-400/40 text-indigo-100'
+                        : 'bg-white/5 border-white/10 text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    <span className="font-black">V{historyItems.length - index}</span>
+                    <span className="mx-1 text-slate-500">|</span>
+                    {layout.rows}x{layout.cols}
+                    <span className="mx-1 text-slate-500">|</span>
+                    {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => onRestoreHistory(activeHistoryIndex)}
+                className="h-8 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black tracking-widest"
+              >
+                恢复此版本
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {showRenderSettings && (
-        <div className="border-b border-white/10 bg-[#121722] px-6 py-3 grid grid-cols-1 md:grid-cols-[170px_170px_1fr] gap-3 shrink-0">
-          <label className="text-[9px] font-black uppercase tracking-widest text-slate-500">
-            画幅比例
-            <select
-              className="mt-2 w-full h-9 bg-black/40 border border-white/10 rounded-lg px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40"
-              value={config.aspectRatio}
-              onChange={(e) => onUpdateConfig({ aspectRatio: e.target.value as GlobalConfig['aspectRatio'] })}
-            >
-              <option value="16:9">16:9</option>
-              <option value="9:16">9:16</option>
-            </select>
-          </label>
+        <div className="border-b border-white/10 bg-[#121722] px-4 sm:px-6 py-3 grid grid-cols-1 xl:grid-cols-4 gap-3 shrink-0">
+          <section className="rounded-lg border border-white/10 bg-black/20 p-3 min-h-[132px] flex flex-col">
+            <div className="text-[9px] font-black tracking-widest text-slate-500">画幅比例</div>
+            <div className="mt-2 grid grid-cols-2 gap-2 flex-1">
+              {(['16:9', '9:16'] as const).map((ratio) => {
+                const active = config.aspectRatio === ratio;
+                return (
+                  <button
+                    key={ratio}
+                    onClick={() => onUpdateConfig({ aspectRatio: ratio })}
+                    className={`h-full min-h-[72px] rounded-lg border transition-all flex items-center justify-center gap-2 ${
+                      active
+                        ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
+                        : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/30'
+                    }`}
+                    title={`切换画幅为 ${ratio}`}
+                  >
+                    <span
+                      className={`rounded-sm border ${ratio === '16:9' ? 'w-7 h-4' : 'w-4 h-7'} ${
+                        active ? 'border-indigo-200' : 'border-slate-500'
+                      }`}
+                    />
+                    <span className="text-[11px] font-black tracking-widest">{ratio}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
-          <label className="text-[9px] font-black uppercase tracking-widest text-slate-500">
-            输出分辨率
-            <select
-              className="mt-2 w-full h-9 bg-black/40 border border-white/10 rounded-lg px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40"
-              value={config.resolution}
-              onChange={(e) => onUpdateConfig({ resolution: e.target.value as GlobalConfig['resolution'] })}
-            >
-              <option value="2K">2K</option>
-            </select>
-          </label>
+          <section className="rounded-lg border border-white/10 bg-black/20 p-3 min-h-[132px] flex flex-col">
+            <div className="text-[9px] font-black tracking-widest text-slate-500">输出分辨率</div>
+            <div className="mt-2 grid grid-cols-3 gap-2 flex-1">
+              {(['1K', '2K', '4K'] as const).map((resolution) => {
+                const active = config.resolution === resolution;
+                return (
+                  <button
+                    key={resolution}
+                    onClick={() => onUpdateConfig({ resolution })}
+                    className={`h-full min-h-[72px] rounded-lg border transition-all text-[11px] font-black tracking-widest ${
+                      active
+                        ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
+                        : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/30'
+                    }`}
+                    title={`切换分辨率为 ${resolution}`}
+                  >
+                    {resolution}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
-          <label className="text-[9px] font-black uppercase tracking-widest text-slate-500">
-            美术风格（全局）
+          <section className="rounded-lg border border-white/10 bg-black/20 p-3 min-h-[132px] flex flex-col">
+            <div className="text-[9px] font-black tracking-widest text-slate-500">网格布局</div>
+            <div className="mt-2 space-y-2">
+              <div className="text-[10px] text-slate-400">行数</div>
+              <div className="grid grid-cols-5 gap-1.5">
+                {GRID_VALUES.map((value) => {
+                  const active = gridLayout.rows === value;
+                  return (
+                    <button
+                      key={`row-${value}`}
+                      onClick={() => handleGridLayoutChange('rows', value)}
+                      className={`h-8 rounded-md border text-[10px] font-black ${
+                        active
+                          ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
+                          : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/30'
+                      }`}
+                    >
+                      {value}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="text-[10px] text-slate-400">列数</div>
+              <div className="grid grid-cols-5 gap-1.5">
+                {GRID_VALUES.map((value) => {
+                  const active = gridLayout.cols === value;
+                  return (
+                    <button
+                      key={`col-${value}`}
+                      onClick={() => handleGridLayoutChange('cols', value)}
+                      className={`h-8 rounded-md border text-[10px] font-black ${
+                        active
+                          ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
+                          : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/30'
+                      }`}
+                    >
+                      {value}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="mt-auto text-[10px] text-slate-500">当前 {gridLayout.rows}x{gridLayout.cols} / 共 {cellCount} 格</div>
+          </section>
+
+          <label className="rounded-lg border border-white/10 bg-black/20 p-3 min-h-[132px] flex flex-col">
+            <span className="text-[9px] font-black tracking-widest text-slate-500">美术风格（全局）</span>
             <textarea
-              className="mt-2 w-full h-20 bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px] text-slate-200 outline-none resize-none focus:border-indigo-500/40"
+              className="mt-2 w-full flex-1 min-h-[72px] bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px] text-slate-200 outline-none resize-none focus:border-indigo-500/40"
               value={config.artStyle}
-              onChange={(e) => onUpdateConfig({ artStyle: e.target.value })}
+              onChange={(event) => onUpdateConfig({ artStyle: event.target.value })}
             />
           </label>
         </div>
       )}
 
       {inlineHints.length > 0 && (
-        <div className="border-b border-white/10 bg-amber-500/10 px-6 py-2 flex flex-wrap items-center gap-2 shrink-0">
+        <div className="border-b border-white/10 bg-amber-500/10 px-4 sm:px-6 py-2 flex flex-wrap items-center gap-2 shrink-0">
           <span className="text-[9px] font-black uppercase tracking-widest text-amber-300">提示</span>
           {inlineHints.map((hint) => (
             <span
@@ -455,177 +819,257 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
         </div>
       )}
 
-      {/* AI 提案 */}
       {discoveredAssets.length > 0 && (
-        <div className="h-12 bg-amber-500/10 border-b border-amber-500/20 flex items-center px-6 gap-4 shrink-0 z-10 overflow-hidden">
-           <div className="flex items-center gap-2 text-amber-500 shrink-0">
-             <Lightbulb size={14} className="animate-pulse" /><span className="text-[9px] font-black uppercase">提案发现:</span>
-           </div>
-           <div className="flex-1 flex gap-3 overflow-x-auto scrollbar-none py-1">
-             {discoveredAssets.map((asset, idx) => (
-               <div key={idx} onClick={() => onAddGlobalAsset(asset.type, asset.name, asset.description)} className="flex items-center gap-2 bg-black/40 border border-white/5 rounded-full px-3 py-0.5 cursor-pointer hover:border-amber-500/50 transition-all shrink-0">
-                 <span className="text-[8px] font-bold text-slate-200">{asset.name}</span><Plus size={8} className="text-amber-500" />
-               </div>
-             ))}
-           </div>
-           <button onClick={() => setDiscoveredAssets([])} className="text-slate-500"><X size={14} /></button>
+        <div className="h-12 bg-amber-500/10 border-b border-amber-500/20 flex items-center px-4 sm:px-6 gap-4 shrink-0 z-10 overflow-hidden">
+          <div className="flex items-center gap-2 text-amber-500 shrink-0">
+            <Sparkles size={14} className="animate-pulse" />
+            <span className="text-[9px] font-black uppercase">提案发现</span>
+          </div>
+          <div className="flex-1 flex gap-3 overflow-x-auto scrollbar-none py-1">
+            {discoveredAssets.map((asset, index) => (
+              <div
+                key={`${asset.name}-${index}`}
+                onClick={() => onAddGlobalAsset(asset.type, asset.name, asset.description)}
+                className="flex items-center gap-2 bg-black/40 border border-white/5 rounded-full px-3 py-0.5 cursor-pointer hover:border-amber-500/50 transition-all shrink-0"
+              >
+                <span className="text-[8px] font-bold text-slate-200">{asset.name}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={() => setDiscoveredAssets([])} className="text-slate-500">
+            <X size={14} />
+          </button>
         </div>
       )}
 
-      {/* 资产区 */}
-      <div className="h-24 border-b border-white/10 bg-[#0f1115] flex items-center px-6 gap-8 shrink-0 overflow-x-auto scrollbar-none">
-        <div className="flex items-center gap-4 border-r border-white/10 pr-8">
-          <div className="flex flex-col items-center gap-1"><User size={12} className="text-indigo-400" /><span className="text-[8px] font-black text-slate-500">角色</span></div>
-          {config.characters.map(char => (
-            <AssetBubble key={char.id} item={char} accentColor="indigo" active={shot.characterIds?.includes(char.id)} onUnlink={() => {}} typeIcon={<User size={16}/>} />
-          ))}
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="flex flex-col items-center gap-1"><MapIcon size={12} className="text-amber-400" /><span className="text-[8px] font-black text-slate-500">场景</span></div>
-          {config.scenes.map(scene => (
-            <AssetBubble key={scene.id} item={scene} accentColor="amber" active={shot.sceneIds?.includes(scene.id)} onUnlink={() => {}} typeIcon={<MapIcon size={16}/>} />
-          ))}
-        </div>
-      </div>
-
-      {/* 资产注入提示 */}
-      <div className="h-10 border-b border-white/10 bg-[#10141a] flex items-center px-6 gap-2 shrink-0 overflow-x-auto scrollbar-none">
-        <span className="text-[9px] font-black uppercase tracking-widest text-slate-500">已注入资产</span>
-        {hasBoundAssets ? (
-          <div className="flex items-center gap-2">
-            {boundCharacters.map((c) => (
-              <AssetChip key={`char-${c.id}`} label={`角色:${c.name}`} tone="indigo" />
-            ))}
-            {boundScenes.map((s) => (
-              <AssetChip key={`scene-${s.id}`} label={`场景:${s.name}`} tone="amber" />
-            ))}
-            {boundProps.map((p) => (
-              <AssetChip key={`prop-${p.id}`} label={`道具:${p.name}`} tone="emerald" />
-            ))}
-          </div>
-        ) : (
-          <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">未绑定资产</span>
-        )}
-      </div>
-
-      {/* 矩阵核心：单母图模式 vs 子图模式 */}
-      <div className="flex-1 p-4 bg-[#0d0f13] overflow-auto relative">
-        <div className="grid grid-cols-3 grid-rows-3 gap-2.5 min-w-[840px] min-h-[540px] h-full">
-          {prompts.map((p, idx) => {
-            const hasSlicing = !!shot.splitImages?.[idx];
-            const videoUrl = shot.videoUrls?.[idx];
-            const videoStatus = shot.videoStatus?.[idx] || 'idle';
-            const isVideoBusy = videoStatus === 'queued' || videoStatus === 'processing' || videoStatus === 'downloading';
-            const statusLabel = {
-              idle: '待命',
-              queued: '排队',
-              processing: '处理中',
-              downloading: '下载中',
-              completed: '完成',
-              failed: '失败',
-            }[videoStatus];
-
-            return (
-              <div key={idx} className={`relative group rounded-xl border-2 transition-all duration-500 flex flex-col h-full bg-[#16191f] overflow-hidden ${hasSlicing ? 'border-indigo-500/10' : 'border-white/5 hover:border-indigo-500/30'}`}>
-                {/* 悬浮标签 */}
-                <div className="absolute top-2 left-2 z-30 pointer-events-none">
-                  <span className="text-[9px] font-mono font-black text-white bg-black/60 px-2 py-0.5 rounded border border-white/10 backdrop-blur-md uppercase tracking-tighter">
-                    {camNames[idx]}
-                  </span>
-                </div>
-
-                {/* 交互操作栏 (仅生成后) */}
-                {hasSlicing && (
-                  <div className="absolute top-2 right-2 z-30 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button 
-                      onClick={() => openVideoModal(idx)}
-                      disabled={isVideoBusy}
-                      className={`p-1.5 rounded-lg border border-white/10 backdrop-blur-md transition-all ${videoStatus === 'completed' ? 'bg-emerald-500 text-white' : 'bg-black/60 text-slate-200 hover:bg-indigo-600'}`}
-                      title={isVideoBusy ? `当前机位视频状态：${statusLabel}` : '生成视频预演 (Sora-2)'}
-                    >
-                      {isVideoBusy ? <Loader2 size={12} className="animate-spin"/> : <Video size={12}/>}
-                    </button>
-                    <button 
-                      onClick={() => setActivePreviewIndex(idx)}
-                      className="p-1.5 bg-black/60 text-slate-200 hover:bg-white hover:text-black rounded-lg border border-white/10 backdrop-blur-md transition-all"
-                    >
-                      <Maximize2 size={12}/>
-                    </button>
-                  </div>
-                )}
-
-                {/* 内容层 */}
-                {hasSlicing ? (
-                  <div className="relative flex-1 w-full h-full overflow-hidden">
-                    {videoUrl ? (
-                      <video src={videoUrl} className="w-full h-full object-cover" autoPlay loop muted playsInline />
-                    ) : (
-                      <img src={shot.splitImages![idx]} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
-                    )}
-                    {(videoStatus === 'queued' || videoStatus === 'processing' || videoStatus === 'downloading') && (
-                      <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
-                        <Loader2 size={24} className="text-indigo-400 animate-spin" />
-                        <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">{statusLabel}...</span>
-                      </div>
-                    )}
-                    {videoStatus === 'failed' && (
-                      <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-2">
-                        <AlertTriangle size={20} className="text-rose-400" />
-                        <span className="text-[9px] font-black text-rose-300 tracking-widest">失败</span>
-                      </div>
-                    )}
-                  </div>
+      <div className="min-h-24 border-b border-white/10 bg-[#0f1115] flex items-center px-4 sm:px-6 gap-5 shrink-0 overflow-x-auto scrollbar-none py-3">
+        {assetRailSections.map((section, sectionIndex) => {
+          const linkedSet = new Set(shot[section.key] || []);
+          return (
+            <div
+              key={section.key}
+              className={`flex items-center gap-3 ${sectionIndex < assetRailSections.length - 1 ? 'border-r border-white/10 pr-5' : ''}`}
+            >
+              <div className="flex flex-col items-center gap-1 shrink-0">
+                {section.icon}
+                <span className="text-[8px] font-black text-slate-500">{section.label}</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                {section.items.length === 0 ? (
+                  <span className="text-[9px] text-slate-600">暂无</span>
                 ) : (
-                  <div className="flex-1 relative flex flex-col">
-                    <textarea 
-                      className="flex-1 w-full h-full p-4 pt-10 bg-transparent text-[11px] font-medium leading-relaxed text-slate-100 outline-none resize-none placeholder:text-slate-800 focus:bg-white/5 transition-all scrollbar-none"
-                      value={p}
-                      onChange={(e) => handlePromptChange(idx, e.target.value)}
-                      placeholder="等待生成指令参数..."
+                  section.items.map((asset) => (
+                    <AssetBubble
+                      key={asset.id}
+                      item={asset}
+                      accentColor={section.accentColor}
+                      active={linkedSet.has(asset.id)}
+                      onToggle={() => toggleAssetBinding(section.key, asset.id)}
+                      onUpload={(event: React.ChangeEvent<HTMLInputElement>) => {
+                        const file = event.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          const refImage = typeof reader.result === 'string' ? reader.result : '';
+                          if (refImage) {
+                            onUpdateGlobalAsset(section.assetType, asset.id, { refImage });
+                          }
+                        };
+                        reader.readAsDataURL(file);
+                        event.target.value = '';
+                      }}
+                      typeIcon={
+                        section.key === 'characterIds' ? (
+                          <User size={16} />
+                        ) : section.key === 'sceneIds' ? (
+                          <MapIcon size={16} />
+                        ) : (
+                          <Box size={16} />
+                        )
+                      }
                     />
-                    {(isGeneratingImage || isPromptingAll) && (
-                      <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex flex-col items-center justify-center gap-2">
-                         <Loader2 size={16} className="text-indigo-400 animate-spin" />
-                      </div>
-                    )}
-                  </div>
+                  ))
                 )}
               </div>
-            );
-          })}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex-1 min-h-0 p-3 sm:p-4 bg-[#0d0f13] overflow-hidden">
+        <div className="h-full min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] gap-3">
+          <section className="min-h-0 rounded-xl border border-white/10 bg-[#131722] overflow-hidden flex flex-col">
+            <div className="h-11 px-4 border-b border-white/10 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black tracking-widest text-slate-300">分镜网格</span>
+                <span className="text-[10px] text-slate-500">{gridLayout.rows}x{gridLayout.cols}</span>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                {isCanvasSlicing && (
+                  <span className="inline-flex items-center gap-1 text-indigo-300">
+                    <Loader2 size={12} className="animate-spin" /> Canvas 切片中
+                  </span>
+                )}
+                <button
+                  onClick={() => setActivePreviewIndex(0)}
+                  disabled={!shot.generatedImageUrl && !displaySplitImages.some(Boolean)}
+                  className="h-7 px-2 rounded bg-white/5 hover:bg-white/10 text-slate-300 disabled:opacity-30"
+                  title="打开大图预览"
+                >
+                  <Maximize2 size={12} />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 min-h-0 p-3 overflow-auto">
+              {displaySplitImages.some(Boolean) ? (
+                <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${gridLayout.cols}, minmax(0, 1fr))` }}>
+                  {Array.from({ length: cellCount }, (_item, index) => {
+                    const label = getAngleLabel(index);
+                    const status = videoStatus[index];
+                    const image = displaySplitImages[index];
+                    const video = videoUrls[index];
+                    return (
+                      <button
+                        key={label}
+                        onClick={() => setActivePreviewIndex(index)}
+                        className="relative group rounded-lg overflow-hidden border border-white/10 bg-black/40 min-h-[84px]"
+                        title={`${label} - 点击预览`}
+                      >
+                        {video ? (
+                          <video src={video} className="w-full h-full object-cover" autoPlay loop muted playsInline />
+                        ) : image ? (
+                          <img src={image} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-600">暂无图像</div>
+                        )}
+                        <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-[9px] font-black text-slate-100 border border-white/10">
+                          {label}
+                        </div>
+                        {(status === 'queued' || status === 'processing' || status === 'downloading') && (
+                          <div className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center gap-1">
+                            <Loader2 size={16} className="animate-spin text-indigo-300" />
+                            <span className="text-[9px] text-indigo-200">{VIDEO_STATUS_TEXT[status]}</span>
+                          </div>
+                        )}
+                        {status === 'failed' && (
+                          <div className="absolute inset-0 bg-black/65 flex flex-col items-center justify-center gap-1">
+                            <AlertTriangle size={16} className="text-rose-300" />
+                            <span className="text-[9px] text-rose-200">失败</span>
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : shot.generatedImageUrl ? (
+                <div className="h-full flex items-center justify-center rounded-lg border border-white/10 bg-black/40 overflow-hidden">
+                  <img src={shot.generatedImageUrl} className="w-full h-full object-contain" />
+                </div>
+              ) : (
+                <div className="h-full rounded-lg border border-dashed border-white/10 bg-black/20 flex flex-col items-center justify-center gap-2 text-slate-500 text-[11px]">
+                  <Clock3 size={18} />
+                  <span>尚未生成分镜网格图</span>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="min-h-0 rounded-xl border border-white/10 bg-[#131722] overflow-hidden flex flex-col">
+            <div className="h-11 px-4 border-b border-white/10 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black tracking-widest text-slate-300">分镜提示词列表</span>
+                <span className="text-[10px] text-slate-500">{cellCount} 条</span>
+              </div>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-3 py-3 space-y-2">
+              {prompts.map((prompt, index) => {
+                const label = getAngleLabel(index);
+                const status = videoStatus[index];
+                const statusText = VIDEO_STATUS_TEXT[status];
+                const canOpenVideoModal = Boolean(splitImages[index]);
+                const isVideoBusy = status === 'queued' || status === 'processing' || status === 'downloading';
+                return (
+                  <div key={label} className="rounded-lg border border-white/10 bg-black/30 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-[10px] font-black text-indigo-300 shrink-0">{label}</span>
+                        <span
+                          className={`text-[9px] px-1.5 py-0.5 rounded border ${
+                            status === 'completed'
+                              ? 'border-emerald-400/30 bg-emerald-500/15 text-emerald-200'
+                              : status === 'failed'
+                                ? 'border-rose-400/30 bg-rose-500/15 text-rose-200'
+                                : 'border-white/10 bg-white/5 text-slate-400'
+                          }`}
+                        >
+                          {statusText}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => openVideoModal(index)}
+                        disabled={!canOpenVideoModal || isVideoBusy}
+                        className="h-7 px-2 rounded bg-white/5 hover:bg-white/10 text-slate-300 disabled:opacity-30 text-[10px] flex items-center gap-1"
+                        title={
+                          !canOpenVideoModal
+                            ? '请先生成并保存网格切片后再生成机位视频'
+                            : isVideoBusy
+                              ? `当前状态：${statusText}`
+                              : '生成该机位视频'
+                        }
+                      >
+                        {isVideoBusy ? <Loader2 size={12} className="animate-spin" /> : <Video size={12} />}
+                        机位视频
+                      </button>
+                    </div>
+                    <textarea
+                      className="w-full h-20 bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-[11px] text-slate-100 outline-none resize-y min-h-[72px] focus:border-indigo-500/40"
+                      value={prompt}
+                      onChange={(event) => handlePromptChange(index, event.target.value)}
+                      placeholder="输入该格提示词..."
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </section>
         </div>
       </div>
 
-      {/* 沉浸式预览弹窗 */}
       {activePreviewIndex !== null && (
-        <div className="fixed inset-0 bg-black/98 z-[200] flex items-center justify-center p-12" onClick={() => setActivePreviewIndex(null)}>
-           <div className="relative w-full h-full max-w-5xl flex flex-col items-center gap-6" onClick={e => e.stopPropagation()}>
-              <div className="absolute top-0 right-0 p-4">
-                 <button onClick={() => setActivePreviewIndex(null)} className="p-3 bg-white/10 rounded-full hover:bg-white/20 transition-all">
-                    <X size={24} className="text-white" />
-                 </button>
+        <div className="fixed inset-0 bg-black/95 z-[200] flex items-center justify-center p-8" onClick={() => setActivePreviewIndex(null)}>
+          <div className="relative w-full h-full max-w-6xl flex flex-col items-center gap-4" onClick={(event) => event.stopPropagation()}>
+            <div className="absolute top-0 right-0 p-4">
+              <button onClick={() => setActivePreviewIndex(null)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-all">
+                <X size={20} className="text-white" />
+              </button>
+            </div>
+            <div className="flex-1 w-full bg-black rounded-2xl overflow-hidden border border-white/10 shadow-[0_0_80px_rgba(99,102,241,0.2)]">
+              {videoUrls[activePreviewIndex] ? (
+                <video src={videoUrls[activePreviewIndex] || undefined} className="w-full h-full object-contain" controls autoPlay loop />
+              ) : displaySplitImages[activePreviewIndex] ? (
+                <img src={displaySplitImages[activePreviewIndex]} className="w-full h-full object-contain" />
+              ) : shot.generatedImageUrl ? (
+                <img src={shot.generatedImageUrl} className="w-full h-full object-contain" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-slate-500">暂无预览内容</div>
+              )}
+            </div>
+            <div className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="px-2 py-0.5 rounded bg-indigo-500 text-white text-[10px] font-black">{getAngleLabel(activePreviewIndex)}</span>
+                <span className="text-[10px] text-slate-500">镜头：{shot.id}</span>
               </div>
-              <div className="flex-1 w-full bg-black rounded-3xl overflow-hidden border border-white/10 shadow-[0_0_100px_rgba(99,102,241,0.2)]">
-                {shot.videoUrls?.[activePreviewIndex] ? (
-                  <video src={shot.videoUrls[activePreviewIndex]!} className="w-full h-full object-contain" controls autoPlay loop />
-                ) : (
-                  <img src={shot.splitImages?.[activePreviewIndex]} className="w-full h-full object-contain" />
-                )}
-              </div>
-              <div className="bg-white/5 backdrop-blur-xl p-8 rounded-2xl border border-white/10 w-full">
-                 <div className="flex items-center gap-3 mb-3">
-                   <span className="px-3 py-1 bg-indigo-500 text-white text-[10px] font-black rounded-lg uppercase">{camNames[activePreviewIndex]}</span>
-                   <span className="text-slate-500 text-xs font-mono">镜头: {shot.id}</span>
-                 </div>
-                 <p className="text-slate-200 text-sm leading-relaxed italic">"{prompts[activePreviewIndex]}"</p>
-              </div>
+              <p className="text-[12px] text-slate-200 leading-relaxed">{prompts[activePreviewIndex]}</p>
+            </div>
           </div>
         </div>
       )}
 
       {showAnimaticPreview && shot.animaticVideoUrl && (
         <div className="fixed inset-0 bg-black/95 z-[210] flex items-center justify-center p-10" onClick={() => setShowAnimaticPreview(false)}>
-          <div className="relative w-full h-full max-w-6xl flex flex-col items-center gap-6" onClick={(e) => e.stopPropagation()}>
+          <div className="relative w-full h-full max-w-6xl flex flex-col items-center gap-6" onClick={(event) => event.stopPropagation()}>
             <div className="absolute top-0 right-0 p-4">
               <button onClick={() => setShowAnimaticPreview(false)} className="p-3 bg-white/10 rounded-full hover:bg-white/20 transition-all">
                 <X size={24} className="text-white" />
@@ -634,20 +1078,13 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             <div className="flex-1 w-full bg-black rounded-3xl overflow-hidden border border-white/10 shadow-[0_0_80px_rgba(99,102,241,0.25)]">
               <video src={shot.animaticVideoUrl} className="w-full h-full object-contain" controls autoPlay />
             </div>
-            <div className="bg-white/5 backdrop-blur-xl p-6 rounded-2xl border border-white/10 w-full">
-              <div className="flex items-center gap-3 mb-2">
-                <span className="px-3 py-1 bg-indigo-500 text-white text-[10px] font-black rounded-lg uppercase">Animatic</span>
-                <span className="text-slate-500 text-xs font-mono">镜头: {shot.id}</span>
-              </div>
-              <p className="text-slate-200 text-sm leading-relaxed italic">"{shot.visualTranslation}"</p>
-            </div>
           </div>
         </div>
       )}
 
       {showAssetVideoPreview && shot.assetVideoUrl && (
         <div className="fixed inset-0 bg-black/95 z-[215] flex items-center justify-center p-10" onClick={() => setShowAssetVideoPreview(false)}>
-          <div className="relative w-full h-full max-w-6xl flex flex-col items-center gap-6" onClick={(e) => e.stopPropagation()}>
+          <div className="relative w-full h-full max-w-6xl flex flex-col items-center gap-6" onClick={(event) => event.stopPropagation()}>
             <div className="absolute top-0 right-0 p-4">
               <button onClick={() => setShowAssetVideoPreview(false)} className="p-3 bg-white/10 rounded-full hover:bg-white/20 transition-all">
                 <X size={24} className="text-white" />
@@ -655,13 +1092,6 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             </div>
             <div className="flex-1 w-full bg-black rounded-3xl overflow-hidden border border-white/10 shadow-[0_0_80px_rgba(16,185,129,0.25)]">
               <video src={shot.assetVideoUrl} className="w-full h-full object-contain" controls autoPlay />
-            </div>
-            <div className="bg-white/5 backdrop-blur-xl p-6 rounded-2xl border border-white/10 w-full">
-              <div className="flex items-center gap-3 mb-2">
-                <span className="px-3 py-1 bg-emerald-500 text-white text-[10px] font-black rounded-lg">资产视频</span>
-                <span className="text-slate-500 text-xs font-mono">镜头: {shot.id}</span>
-              </div>
-              <p className="text-slate-200 text-sm leading-relaxed italic">"{shot.visualTranslation}"</p>
             </div>
           </div>
         </div>
@@ -676,14 +1106,11 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                   <Film size={18} />
                 </div>
                 <div>
-                  <div className="text-[11px] font-black tracking-widest text-slate-300">视频生成</div>
+                  <div className="text-[11px] font-black tracking-widest text-slate-300">机位视频生成</div>
                   <div className="text-[10px] text-slate-500">确认后开始调用 Sora-2</div>
                 </div>
               </div>
-              <button
-                onClick={() => setVideoModalIndex(null)}
-                className="p-2 rounded-full bg-white/5 hover:bg-white/10 transition-all"
-              >
+              <button onClick={() => setVideoModalIndex(null)} className="p-2 rounded-full bg-white/5 hover:bg-white/10 transition-all">
                 <X size={16} className="text-slate-300" />
               </button>
             </div>
@@ -692,15 +1119,15 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
               <div className="space-y-4">
                 <div className="text-[10px] font-black tracking-widest text-slate-400">参考帧</div>
                 <div className="aspect-video bg-black/40 border border-white/10 rounded-xl overflow-hidden">
-                  {shot.splitImages?.[videoModalIndex] ? (
-                    <img src={shot.splitImages[videoModalIndex]} className="w-full h-full object-cover" />
+                  {splitImages[videoModalIndex] ? (
+                    <img src={splitImages[videoModalIndex]} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">暂无图像</div>
                   )}
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
                   <span>镜头: SH_{shot.id.substring(0, 4)}</span>
-                  <span>{camNames[videoModalIndex]}</span>
+                  <span>{getAngleLabel(videoModalIndex)}</span>
                 </div>
               </div>
 
@@ -714,39 +1141,31 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                     }}
                     className="text-[10px] font-black text-indigo-300 hover:text-indigo-200"
                   >
-                    使用当前镜头提示词
+                    使用当前机位提示词
                   </button>
                 </div>
                 <textarea
                   value={videoPromptDraft}
-                  onChange={(e) => setVideoPromptDraft(e.target.value)}
+                  onChange={(event) => setVideoPromptDraft(event.target.value)}
                   className="w-full h-40 bg-black/40 border border-white/10 rounded-xl p-3 text-[11px] text-slate-200 outline-none resize-none focus:border-indigo-500/50 focus:bg-white/5"
-                  placeholder="为视频生成补充动作/镜头描述..."
+                  placeholder="为视频补充动作/镜头描述..."
                 />
                 <label className="flex items-center gap-2 text-[10px] text-slate-400">
                   <input
                     type="checkbox"
                     checked={syncVideoPrompt}
-                    onChange={(e) => setSyncVideoPrompt(e.target.checked)}
+                    onChange={(event) => setSyncVideoPrompt(event.target.checked)}
                     className="accent-indigo-500"
                   />
-                  同步更新该机位 Prompt
+                  同步更新该机位提示词
                 </label>
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[10px] text-amber-200">
-                  提示：视频生成耗时较长，建议确认提示词后再开始生成。
-                </div>
               </div>
             </div>
 
             <div className="flex items-center justify-between px-6 py-4 border-t border-white/10 bg-[#10131a]">
-              <div className="text-[10px] text-slate-500">
-                状态流转：排队 → 处理中 → 下载中 → 完成
-              </div>
+              <div className="text-[10px] text-slate-500">状态流转：排队 → 处理中 → 下载中 → 完成</div>
               <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setVideoModalIndex(null)}
-                  className="h-9 px-4 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 text-[10px] font-black tracking-widest"
-                >
+                <button onClick={() => setVideoModalIndex(null)} className="h-9 px-4 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 text-[10px] font-black tracking-widest">
                   取消
                 </button>
                 <button
@@ -760,7 +1179,8 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                     handleCreateShotVideo(videoModalIndex, finalPrompt);
                     setVideoModalIndex(null);
                   }}
-                  className="h-9 px-5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-400 text-[10px] font-black tracking-widest shadow-lg"
+                  disabled={!splitImages[videoModalIndex]}
+                  className="h-9 px-5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-400 text-[10px] font-black tracking-widest shadow-lg disabled:opacity-40"
                 >
                   开始生成
                 </button>

@@ -5,7 +5,15 @@ import * as path from 'node:path';
 import { episodeRepo, type DBEpisode } from '../db/repos/episodeRepo';
 import { shotRepo, type DBShot } from '../db/repos/shotRepo';
 import { assetRepo, type DBAsset } from '../db/repos/assetRepo';
-import type { EpisodeData, Shot, Character, Scene, Prop } from '../../shared/types';
+import type { EpisodeData, Shot, Character, Scene, Prop, ShotHistoryItem } from '../../shared/types';
+import {
+  ensurePromptListLength,
+  getGridCellCount,
+  normalizeGridLayout,
+  normalizeIndexedList,
+  parseMatrixPromptPayload,
+  serializeMatrixPromptPayload,
+} from '../../shared/utils';
 import { keyFromPath, resolveUrlToPath, urlFromPath, readFileAsDataUri } from './mediaService';
 
 // Helper to parse JSON safely
@@ -141,6 +149,41 @@ async function readMediaDataUri(storedPath: string | null) {
   }
 }
 
+async function hydrateHistoryEntries(
+  rawEntries: ShotHistoryItem[],
+  mediaFormat: 'url' | 'dataUri',
+  fallbackLayout?: Shot['gridLayout'],
+): Promise<ShotHistoryItem[]> {
+  const resolveMedia = mediaFormat === 'dataUri' ? readMediaDataUri : readMediaUrl;
+  return Promise.all(
+    rawEntries.map(async (entry) => {
+      const gridLayout = normalizeGridLayout(entry.gridLayout, normalizeGridLayout(fallbackLayout));
+      const cellCount = getGridCellCount(gridLayout);
+      const imageUrl = (await resolveMedia(entry.imageUrl || null)) || entry.imageUrl;
+      const splitImages = await Promise.all(
+        normalizeIndexedList<string>(entry.splitImages as string[] | undefined, cellCount, '').map(async (item) => {
+          if (!item) return '';
+          return (await resolveMedia(item)) || '';
+        }),
+      );
+      const videoUrls = await Promise.all(
+        normalizeIndexedList<string | null>(entry.videoUrls, cellCount, null).map(async (item) => {
+          if (!item) return null;
+          return (await resolveMedia(item)) || null;
+        }),
+      );
+      return {
+        ...entry,
+        imageUrl: imageUrl || '',
+        gridLayout,
+        prompts: ensurePromptListLength(entry.prompts, gridLayout),
+        splitImages,
+        videoUrls,
+      };
+    }),
+  );
+}
+
 export const dbService = {
   // --- Episode Operations ---
 
@@ -254,7 +297,7 @@ export const dbService = {
         visual_translation: shot.visualTranslation,
         context_tag: shot.contextTag,
         shot_kind: shot.shotKind || null,
-        matrix_prompts_json: stringifyJson(shot.matrixPrompts),
+        matrix_prompts_json: stringifyJson(serializeMatrixPromptPayload(shot.matrixPrompts, shot.gridLayout)),
         generated_image_path: matrixPath,
         split_images_json: stringifyJson(splitPaths),
         video_urls_json: stringifyJson(videoPaths),
@@ -309,16 +352,38 @@ export const dbService = {
     // Transform Shots
     const shots: Shot[] = await Promise.all(
       dbShots.map(async (s) => {
-        const splitPaths = parseJson<(string | null)[]>(s.split_images_json, []);
-        const splitImages =
-          options?.mediaFormat === 'dataUri'
-            ? await Promise.all(splitPaths.map((p) => (p ? readMediaDataUri(p) : undefined)))
-            : await Promise.all(splitPaths.map((p) => (p ? readMediaUrl(p) : undefined)));
-        const videoPaths = parseJson<(string | null)[]>(s.video_urls_json, []);
-        const videoUrls =
-          options?.mediaFormat === 'dataUri'
-            ? await Promise.all(videoPaths.map((p) => (p ? readMediaDataUri(p) : undefined)))
-            : await Promise.all(videoPaths.map((p) => (p ? readMediaUrl(p) : undefined)));
+        const mediaFormat = options?.mediaFormat === 'dataUri' ? 'dataUri' : 'url';
+        const resolveMedia = mediaFormat === 'dataUri' ? readMediaDataUri : readMediaUrl;
+        const matrixPayload = parseJson<unknown>(s.matrix_prompts_json, null);
+        const parsedMatrix = parseMatrixPromptPayload(matrixPayload);
+
+        const rawHistory = parseJson<ShotHistoryItem[]>(s.history_json, []);
+        const hydratedHistory = await hydrateHistoryEntries(rawHistory, mediaFormat, parsedMatrix.gridLayout);
+        const historyFallbackLayout = hydratedHistory[0]?.gridLayout;
+        const gridLayout = normalizeGridLayout(parsedMatrix.gridLayout, historyFallbackLayout);
+        const cellCount = getGridCellCount(gridLayout);
+
+        const matrixPrompts = ensurePromptListLength(parsedMatrix.prompts, gridLayout);
+
+        const splitPaths = normalizeIndexedList<string | null>(
+          parseJson<(string | null)[]>(s.split_images_json, []),
+          cellCount,
+          null,
+        );
+        const splitImages = await Promise.all(splitPaths.map((p) => (p ? resolveMedia(p) : undefined)));
+
+        const videoPaths = normalizeIndexedList<string | null>(
+          parseJson<(string | null)[]>(s.video_urls_json, []),
+          cellCount,
+          null,
+        );
+        const videoUrls = await Promise.all(videoPaths.map((p) => (p ? resolveMedia(p) : undefined)));
+
+        const videoStatus = normalizeIndexedList<Shot['videoStatus'][number]>(
+          parseJson<Shot['videoStatus']>(s.video_status_json, []),
+          cellCount,
+          'idle',
+        );
 
         return {
           id: s.id,
@@ -326,25 +391,17 @@ export const dbService = {
           visualTranslation: s.visual_translation || '',
           contextTag: s.context_tag || '',
           shotKind: (s.shot_kind as any) || undefined,
-          matrixPrompts: parseJson(s.matrix_prompts_json, []),
-          generatedImageUrl:
-            options?.mediaFormat === 'dataUri'
-              ? await readMediaDataUri(s.generated_image_path)
-              : await readMediaUrl(s.generated_image_path),
+          gridLayout,
+          matrixPrompts,
+          generatedImageUrl: await resolveMedia(s.generated_image_path),
           splitImages: (splitImages.map((v) => v || '') as unknown as string[]),
           videoUrls: (videoUrls.map((v) => v ?? null) as unknown as (string | null)[]),
-          animaticVideoUrl:
-            options?.mediaFormat === 'dataUri'
-              ? await readMediaDataUri(s.animatic_video_path)
-              : await readMediaUrl(s.animatic_video_path),
-          assetVideoUrl:
-            options?.mediaFormat === 'dataUri'
-              ? await readMediaDataUri(s.asset_video_path)
-              : await readMediaUrl(s.asset_video_path),
+          animaticVideoUrl: await resolveMedia(s.animatic_video_path),
+          assetVideoUrl: await resolveMedia(s.asset_video_path),
           status: (s.status as any) || 'pending',
-          videoStatus: parseJson(s.video_status_json, []),
+          videoStatus,
           progress: s.progress || 0,
-          history: options?.mediaFormat === 'dataUri' ? parseJson(s.history_json, []) : undefined,
+          history: hydratedHistory,
           optimization: parseJson(s.optimization_json, undefined),
           characterIds: parseJson(s.character_ids_json, []),
           sceneIds: parseJson(s.scene_ids_json, []),

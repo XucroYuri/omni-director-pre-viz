@@ -16,6 +16,7 @@ interface GlobalOpsPanelProps {
   createZip: boolean;
   setCreateZip: (next: boolean) => void;
   isElectronRuntime: boolean;
+  apiStatus: 'connected' | 'error' | 'idle';
 }
 
 const GlobalOpsPanel: React.FC<GlobalOpsPanelProps> = ({
@@ -31,6 +32,7 @@ const GlobalOpsPanel: React.FC<GlobalOpsPanelProps> = ({
   createZip,
   setCreateZip,
   isElectronRuntime,
+  apiStatus,
 }) => {
   const renderedShotCount = useMemo(
     () => shots.filter((shot) => Boolean(shot.generatedImageUrl)).length,
@@ -44,6 +46,12 @@ const GlobalOpsPanel: React.FC<GlobalOpsPanelProps> = ({
       ? '请先至少渲染一个镜头。'
       : '';
 
+  const statusMeta: Record<GlobalOpsPanelProps['apiStatus'], { text: string; dot: string; textTone: string }> = {
+    connected: { text: '服务正常', dot: 'bg-emerald-500', textTone: 'text-emerald-300' },
+    error: { text: '需要处理', dot: 'bg-red-500', textTone: 'text-red-300' },
+    idle: { text: '待命中', dot: 'bg-slate-500', textTone: 'text-slate-300' },
+  };
+
   return (
     <aside className="w-80 bg-[#16191f] border-l border-white/10 flex flex-col shrink-0">
       <div className="h-14 border-b border-white/10 px-4 flex items-center">
@@ -51,6 +59,17 @@ const GlobalOpsPanel: React.FC<GlobalOpsPanelProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
+        <section className="bg-slate-500/5 rounded-xl border border-white/10 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black text-slate-200 tracking-widest">任务状态</span>
+            <span className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${statusMeta[apiStatus].dot}`} />
+              <span className={`text-[10px] font-black ${statusMeta[apiStatus].textTone}`}>{statusMeta[apiStatus].text}</span>
+            </span>
+          </div>
+          <p className="text-[10px] text-slate-500">状态信息已整合到任务区，用于监控生成与导出流程。</p>
+        </section>
+
         <section className="bg-slate-500/5 rounded-xl border border-white/10 p-4">
           <div className="flex items-center gap-2 mb-3">
             <Package size={14} className="text-slate-300" />

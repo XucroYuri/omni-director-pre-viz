@@ -3,7 +3,14 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { GlobalConfig, Shot } from '../../../shared/types';
-import { buildAssetInjection, getBoundAssets } from '../../../shared/utils';
+import {
+  buildAssetInjection,
+  ensurePromptListLength,
+  getAngleLabel,
+  getBoundAssets,
+  getGridCellCount,
+  normalizeGridLayout,
+} from '../../../shared/utils';
 import type { DiscoverMissingAssetsResult, MissingAssetCandidate, RecommendAssetsResult } from '../../../shared/ipc';
 import {
   IMAGE_MODEL,
@@ -57,12 +64,9 @@ function parseDataUri(dataUri: string) {
 }
 
 function validateShotConsistency(shot: Shot, config: GlobalConfig) {
-  const { characters, scenes } = getBoundAssets(shot, config);
+  const { scenes } = getBoundAssets(shot, config);
   if (scenes.length === 0) {
     throw new Error('POLICY_VIOLATION: Missing Scene Binding');
-  }
-  if (characters.length === 0 && shot.shotKind !== 'ENV') {
-    throw new Error('POLICY_VIOLATION: Missing Character Binding');
   }
 }
 
@@ -113,17 +117,22 @@ export async function breakdownScript(script: string, config: GlobalConfig) {
   const shots = Array.isArray((result as any).shots) ? (result as any).shots : [];
   return {
     context: (result as any).context || '',
-    shots: shots.map((s: any) => ({
-      ...s,
-      status: 'pending',
-      progress: 0,
-      shotKind: 'CHAR',
-      characterIds: [],
-      sceneIds: [],
-      propIds: [],
-      videoUrls: Array(9).fill(null),
-      videoStatus: Array(9).fill('idle'),
-    })),
+    shots: shots.map((s: any) => {
+      const gridLayout = normalizeGridLayout();
+      const cellCount = getGridCellCount(gridLayout);
+      return {
+        ...s,
+        gridLayout,
+        matrixPrompts: Array(cellCount).fill(''),
+        status: 'pending',
+        progress: 0,
+        characterIds: [],
+        sceneIds: [],
+        propIds: [],
+        videoUrls: Array(cellCount).fill(null),
+        videoStatus: Array(cellCount).fill('idle'),
+      };
+    }),
     characters: Array.isArray((result as any).characters) ? (result as any).characters : [],
   };
 }
@@ -162,18 +171,33 @@ export async function recommendAssets(shot: Shot, config: GlobalConfig): Promise
 
 export async function generateMatrixPrompts(shot: Shot, config: GlobalConfig): Promise<string[]> {
   const ai = getClient();
+  const gridLayout = normalizeGridLayout(shot.gridLayout);
+  const cellCount = getGridCellCount(gridLayout);
   const assetInjection = buildAssetInjection(shot, config);
   const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
   const response = await ai.models.generateContent({
     model: TEXT_MODEL,
-    contents: `全局风格: ${config.artStyle}\n${assetLine}\n镜头描述: ${shot.visualTranslation}`,
+    contents: [
+      `全局风格: ${config.artStyle}`,
+      assetLine,
+      `网格规格: ${gridLayout.rows}x${gridLayout.cols}（共 ${cellCount} 格）`,
+      `镜头描述: ${shot.visualTranslation}`,
+      `请返回 ${cellCount} 条 Prompt，顺序严格为 ${Array.from({ length: cellCount }, (_item, index) => getAngleLabel(index)).join(', ')}`,
+    ].join('\n'),
     config: {
       systemInstruction: SYSTEM_INSTRUCTION_MATRIX,
       responseMimeType: 'application/json',
       responseSchema: { type: Type.ARRAY, items: { type: Type.STRING } },
     },
   });
-  return (safeJsonParse(response.text || '[]') as any) || [];
+  const parsed = safeJsonParse(response.text || '[]');
+  const rawPrompts = Array.isArray(parsed) ? parsed.map((item) => String(item || '')) : [];
+  return ensurePromptListLength(rawPrompts, gridLayout).map((prompt, index) => {
+    const label = getAngleLabel(index);
+    const trimmed = prompt.trim();
+    if (!trimmed) return `${label}: ${shot.visualTranslation}`;
+    return /^Angle_\d+\s*[:：]/i.test(trimmed) ? trimmed : `${label}: ${trimmed}`;
+  });
 }
 
 export async function optimizePrompts(shot: Shot, config: GlobalConfig) {
@@ -211,7 +235,7 @@ const IMAGE_PRESET_PREFIX = `[生成约束/不可省略]
 - 输出必须忠实于镜头原文语义，不得擅自改写剧情
 - 输出语言默认中文（镜头术语可为英文）
 - 若提供参考图：必须理解并保持角色/场景/道具一致性
-- 输出为一张 3x3 网格母图（9 格），每格为不同机位 Angle_01..Angle_09
+- 输出为一张网格母图，每格对应一个机位 Angle_01..Angle_N
 `;
 
 export async function generateGridImage(
@@ -220,30 +244,28 @@ export async function generateGridImage(
   signal?: AbortSignal,
 ): Promise<{ path: string; dataUri: string }> {
   const ai = getClient();
-  const prompts = shot.matrixPrompts || [];
-  if (prompts.length !== 9) throw new Error('matrixPrompts must have 9 prompts (Angle_01..Angle_09)');
+  const gridLayout = normalizeGridLayout(shot.gridLayout);
+  const cellCount = getGridCellCount(gridLayout);
+  const prompts = ensurePromptListLength(shot.matrixPrompts, gridLayout);
+  if (!prompts.some((prompt) => prompt.trim())) {
+    throw new Error('matrixPrompts cannot be empty');
+  }
 
   validateShotConsistency(shot, config);
   const assetInjection = buildAssetInjection(shot, config);
   const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
+  const angleLines = prompts.map((prompt, index) => `${getAngleLabel(index)}: ${prompt || shot.visualTranslation}`).join('\n');
 
   const compositePrompt = `${IMAGE_PRESET_PREFIX}
 全局风格: ${config.artStyle}
 ${assetLine}
-一致性: 角色、场景、道具在 9 格中必须保持一致。
+网格规格: ${gridLayout.rows} 行 x ${gridLayout.cols} 列（共 ${cellCount} 格）
+一致性: 角色、场景、道具在所有网格中必须保持一致。
 
-九格内容分配：
-Angle_01: ${prompts[0]}
-Angle_02: ${prompts[1]}
-Angle_03: ${prompts[2]}
-Angle_04: ${prompts[3]}
-Angle_05: ${prompts[4]}
-Angle_06: ${prompts[5]}
-Angle_07: ${prompts[6]}
-Angle_08: ${prompts[7]}
-Angle_09: ${prompts[8]}
+网格内容分配：
+${angleLines}
 
-输出要求：单张 3x3 网格母图，无明显网格线，视觉连贯。`;
+输出要求：单张 ${gridLayout.rows}x${gridLayout.cols} 网格母图，无明显网格线，视觉连贯。`;
 
   const parts: any[] = [];
   const selectedAssetsWithImages = [

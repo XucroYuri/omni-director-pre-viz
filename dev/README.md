@@ -9,6 +9,10 @@
 - `dev/Progress-vs-Plan-Codex.md`：当前代码现状 vs 计划差距盘点（仅用于迁移阶段对照）
 - `dev/Consensus-Lock.md`：C队（ChatGPT系主力开发 Agent）×G队（Gemini系辅助/审查 Agent）×维护者（@XucroYuri）“共识锁定记录”（开工前与实施期同步口径）
 
+迭代优化索引（执行侧入口）：
+
+- `dev/Iteration-Index.md`
+
 参考资料（不作为权威要求，但可用于复盘）：
 
 - `dev/migration_review.md`：G队全量代码审查与迁移评估

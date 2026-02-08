@@ -5,30 +5,56 @@ import { registerIpcHandlers } from './ipc';
 import { loadLocalEnvFiles } from './loadEnv';
 import { registerMediaProtocol } from './services/mediaProtocol';
 
+function isBrokenPipeError(error: unknown): error is NodeJS.ErrnoException {
+  return Boolean(error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'EPIPE');
+}
+
 function installStdioBrokenPipeGuards() {
+  let stdioBroken = false;
+
+  const patchWrite = (stream: NodeJS.WriteStream | undefined | null) => {
+    if (!stream) return;
+
+    const originalWrite = stream.write.bind(stream);
+    (stream as any).write = (...args: any[]) => {
+      if (stdioBroken) return false;
+      try {
+        return originalWrite(...args);
+      } catch (error: unknown) {
+        if (isBrokenPipeError(error)) {
+          stdioBroken = true;
+          return false;
+        }
+        throw error;
+      }
+    };
+
+    stream.on('error', (error: unknown) => {
+      if (isBrokenPipeError(error)) {
+        stdioBroken = true;
+      }
+    });
+  };
+
+  patchWrite(process.stdout);
+  patchWrite(process.stderr);
+
   const methods: Array<'log' | 'info' | 'warn' | 'error'> = ['log', 'info', 'warn', 'error'];
   for (const method of methods) {
     const original = console[method].bind(console);
     (console as any)[method] = (...args: any[]) => {
+      if (stdioBroken) return;
       try {
         original(...args);
-      } catch (error: any) {
-        if (error?.code === 'EPIPE') {
+      } catch (error: unknown) {
+        if (isBrokenPipeError(error)) {
+          stdioBroken = true;
           return;
         }
         throw error;
       }
     };
   }
-
-  const swallowBrokenPipe = (error: any) => {
-    if (error?.code === 'EPIPE') {
-      return;
-    }
-  };
-
-  process.stdout?.on('error', swallowBrokenPipe);
-  process.stderr?.on('error', swallowBrokenPipe);
 }
 
 installStdioBrokenPipeGuards();

@@ -3,8 +3,14 @@ import Sidebar from './components/Sidebar';
 import MatrixPromptEditor from './components/MatrixPromptEditor';
 import GlobalOpsPanel from './components/GlobalOpsPanel';
 import { DBTask, GlobalConfig, Shot, ScriptBreakdownResponse } from '@shared/types';
+import {
+  ensurePromptListLength,
+  getGridCellCount,
+  normalizeGridLayout,
+  normalizeIndexedList,
+} from '@shared/utils';
 import { DEFAULT_STYLE } from '@shared/constants';
-import { AlertCircle, BookOpenText, CheckCircle2, Cpu, Info, Keyboard, PanelLeft, PanelRight, Settings, X } from 'lucide-react';
+import { AlertCircle, BookOpenText, CheckCircle2, Cpu, Info, Keyboard, Moon, PanelLeft, PanelRight, Settings, Sun, X } from 'lucide-react';
 import { breakdownScript } from './services/geminiService';
 
 const STORAGE_KEYS = {
@@ -14,11 +20,13 @@ const STORAGE_KEYS = {
   SELECTED_SHOT_ID: 'OMNI_DIRECTOR_SELECTED_ID',
   EPISODE_ID: 'OMNI_DIRECTOR_EPISODE_ID',
   ONBOARDING_DISMISSED: 'OMNI_DIRECTOR_ONBOARDING_DISMISSED',
+  THEME_MODE: 'OMNI_DIRECTOR_THEME_MODE',
 };
 
 type ApiStatus = 'connected' | 'error' | 'idle';
 type NoticeTone = 'success' | 'error' | 'info';
 type ScriptTemplate = { id: string; name: string; script: string };
+type ThemeMode = 'dark' | 'light';
 
 type UiNotice = {
   id: string;
@@ -89,8 +97,48 @@ function stripDataUri(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0;
+function normalizeShotState(rawShot: Shot): Shot {
+  const gridLayout = normalizeGridLayout(rawShot.gridLayout);
+  const cellCount = getGridCellCount(gridLayout);
+  const history = (rawShot.history || []).map((entry) => {
+    const historyLayout = normalizeGridLayout(entry.gridLayout, gridLayout);
+    const historyCellCount = getGridCellCount(historyLayout);
+    return {
+      ...entry,
+      gridLayout: historyLayout,
+      prompts: ensurePromptListLength(entry.prompts, historyLayout),
+      splitImages: normalizeIndexedList<string>(entry.splitImages, historyCellCount, ''),
+      videoUrls: normalizeIndexedList<string | null>(entry.videoUrls, historyCellCount, null),
+    };
+  });
+
+  return {
+    ...rawShot,
+    gridLayout,
+    matrixPrompts: ensurePromptListLength(rawShot.matrixPrompts, gridLayout),
+    splitImages: normalizeIndexedList<string>(rawShot.splitImages, cellCount, ''),
+    videoUrls: normalizeIndexedList<string | null>(rawShot.videoUrls, cellCount, null),
+    videoStatus: normalizeIndexedList<Shot['videoStatus'][number]>(rawShot.videoStatus, cellCount, 'idle'),
+    history: history.length > 0 ? history : rawShot.history,
+  };
+}
+
+function sanitizeHistoryForStorage(shot: Shot) {
+  if (!shot.history || shot.history.length === 0) return shot.history;
+  return shot.history.map((entry) => {
+    const layout = normalizeGridLayout(entry.gridLayout, shot.gridLayout);
+    const cellCount = getGridCellCount(layout);
+    return {
+      ...entry,
+      gridLayout: layout,
+      imageUrl: stripDataUri(entry.imageUrl) || '',
+      prompts: ensurePromptListLength(entry.prompts, layout),
+      splitImages: normalizeIndexedList<string>(entry.splitImages, cellCount, '').map((img) => stripDataUri(img) || ''),
+      videoUrls: normalizeIndexedList<string | null>(entry.videoUrls, cellCount, null).map(
+        (url) => stripDataUri(url) ?? null,
+      ),
+    };
+  });
 }
 
 const App: React.FC = () => {
@@ -125,15 +173,18 @@ const App: React.FC = () => {
     if (!parsed) return null;
     return {
       ...parsed,
-      shots: (parsed.shots || []).map((shot) => ({
-        ...shot,
-        generatedImageUrl: stripDataUri(shot.generatedImageUrl),
-        splitImages: shot.splitImages?.map((img) => stripDataUri(img)).filter(isNonEmptyString),
-        videoUrls: shot.videoUrls?.map((url) => stripDataUri(url) ?? null),
-        animaticVideoUrl: stripDataUri(shot.animaticVideoUrl),
-        assetVideoUrl: stripDataUri(shot.assetVideoUrl),
-        history: undefined,
-      })),
+      shots: (parsed.shots || []).map((shot) => {
+        const normalized = normalizeShotState(shot);
+        return {
+          ...normalized,
+          generatedImageUrl: stripDataUri(normalized.generatedImageUrl),
+          splitImages: normalized.splitImages?.map((img) => stripDataUri(img) || ''),
+          videoUrls: normalized.videoUrls?.map((url) => stripDataUri(url) ?? null),
+          animaticVideoUrl: stripDataUri(normalized.animaticVideoUrl),
+          assetVideoUrl: stripDataUri(normalized.assetVideoUrl),
+          history: sanitizeHistoryForStorage(normalized),
+        } as Shot;
+      }),
     };
   });
   const [selectedShotId, setSelectedShotId] = useState<string | null>(
@@ -161,6 +212,10 @@ const App: React.FC = () => {
   const [isWideLayout, setIsWideLayout] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth >= 1536 : true,
   );
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.THEME_MODE);
+    return saved === 'light' ? 'light' : 'dark';
+  });
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [notices, setNotices] = useState<UiNotice[]>([]);
 
@@ -175,29 +230,10 @@ const App: React.FC = () => {
     [shots, selectedShotId],
   );
 
-  const statusMeta: Record<ApiStatus, { text: string; dot: string; textTone: string }> = {
-    connected: {
-      text: '服务正常',
-      dot: 'bg-emerald-500',
-      textTone: 'text-emerald-300',
-    },
-    error: {
-      text: '需要处理',
-      dot: 'bg-red-500',
-      textTone: 'text-red-300',
-    },
-    idle: {
-      text: '待机',
-      dot: 'bg-slate-500',
-      textTone: 'text-slate-300',
-    },
-  };
-
   const normalizePolicyError = (message: string) => {
     if (!message) return message;
     if (!message.includes('POLICY_VIOLATION')) return message;
     if (message.includes('Missing Scene')) return '生成失败：请先绑定场景。';
-    if (message.includes('Missing Character')) return '生成失败：请先绑定角色，或将镜头标记为 ENV 纯环境。';
     return '生成失败：未满足资产绑定规则。';
   };
 
@@ -271,6 +307,11 @@ const App: React.FC = () => {
   }, [isWideLayout]);
 
   useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.THEME_MODE, themeMode);
+    document.documentElement.setAttribute('data-theme-mode', themeMode);
+  }, [themeMode]);
+
+  useEffect(() => {
     const timer = persistTimers.current.config;
     if (timer) window.clearTimeout(timer);
 
@@ -310,15 +351,18 @@ const App: React.FC = () => {
 
     const sanitized: ScriptBreakdownResponse = {
       ...breakdown,
-      shots: breakdown.shots.map((shot) => ({
-        ...shot,
-        generatedImageUrl: stripDataUri(shot.generatedImageUrl),
-        splitImages: shot.splitImages?.map((img) => stripDataUri(img)).filter(isNonEmptyString),
-        videoUrls: shot.videoUrls?.map((url) => stripDataUri(url) ?? null),
-        animaticVideoUrl: stripDataUri(shot.animaticVideoUrl),
-        assetVideoUrl: stripDataUri(shot.assetVideoUrl),
-        history: undefined,
-      })),
+      shots: breakdown.shots.map((shot) => {
+        const normalized = normalizeShotState(shot);
+        return {
+          ...normalized,
+          generatedImageUrl: stripDataUri(normalized.generatedImageUrl),
+          splitImages: normalized.splitImages?.map((img) => stripDataUri(img) || ''),
+          videoUrls: normalized.videoUrls?.map((url) => stripDataUri(url) ?? null),
+          animaticVideoUrl: stripDataUri(normalized.animaticVideoUrl),
+          assetVideoUrl: stripDataUri(normalized.assetVideoUrl),
+          history: sanitizeHistoryForStorage(normalized),
+        };
+      }),
     };
 
     persistTimers.current.breakdown = window.setTimeout(() => {
@@ -361,7 +405,10 @@ const App: React.FC = () => {
   const updateShot = (id: string, updates: Partial<Shot>) => {
     setBreakdown((prev) => {
       if (!prev) return null;
-      return { ...prev, shots: prev.shots.map((s) => (s.id === id ? { ...s, ...updates } : s)) };
+      return {
+        ...prev,
+        shots: prev.shots.map((s) => (s.id === id ? normalizeShotState({ ...s, ...updates }) : s)),
+      };
     });
   };
 
@@ -386,13 +433,14 @@ const App: React.FC = () => {
         const sanitizeAssets = <T extends { refImage?: string }>(items: T[]) =>
           items.map(({ refImage, ...rest }) => rest);
 
+        const normalizedShot = normalizeShotState(shot);
         const taskShot = {
           id: shot.id,
           originalText: shot.originalText,
           visualTranslation: shot.visualTranslation,
           contextTag: shot.contextTag,
-          shotKind: shot.shotKind,
-          matrixPrompts: shot.matrixPrompts,
+          gridLayout: normalizedShot.gridLayout,
+          matrixPrompts: normalizedShot.matrixPrompts,
           characterIds: shot.characterIds,
           sceneIds: shot.sceneIds,
           propIds: shot.propIds,
@@ -457,12 +505,16 @@ const App: React.FC = () => {
       setIsLoading(true);
       try {
         const result = await breakdownScript(trimmed, config);
-        setBreakdown(result);
-        if (result.shots.length > 0) {
-          setSelectedShotId(result.shots[0].id);
+        const normalizedResult: ScriptBreakdownResponse = {
+          ...result,
+          shots: (result.shots || []).map((shot) => normalizeShotState(shot)),
+        };
+        setBreakdown(normalizedResult);
+        if (normalizedResult.shots.length > 0) {
+          setSelectedShotId(normalizedResult.shots[0].id);
         }
         setApiStatus('connected');
-        pushNotice('success', `${sourceLabel}拆解完成：共生成 ${result.shots.length} 个镜头。`);
+        pushNotice('success', `${sourceLabel}拆解完成：共生成 ${normalizedResult.shots.length} 个镜头。`);
         return true;
       } catch (error: any) {
         pushNotice('error', error?.message || '脚本拆解失败，请稍后重试。');
@@ -502,7 +554,7 @@ const App: React.FC = () => {
       const success = await runBreakdownForScript(template.script, `模板《${template.name}》`);
       if (success) {
         hideOnboarding();
-        pushNotice('info', '下一步：点击「初始化矩阵」后再渲染母图。');
+        pushNotice('info', '下一步：点击「分镜提示词」后再生成分镜网格图。');
       }
     },
     [hideOnboarding, pushNotice, runBreakdownForScript],
@@ -596,13 +648,14 @@ const App: React.FC = () => {
           if (notify) pushNotice('info', `未找到 Episode：${episodeId}`);
           return;
         }
+        const normalizedShots = data.shots.map((shot) => normalizeShotState(shot));
         setConfig(data.config);
         setBreakdown({
           context: '',
-          shots: data.shots,
+          shots: normalizedShots,
           characters: data.assets.characters.map((c) => ({ name: c.name, description: c.description })),
         });
-        setSelectedShotId(data.shots[0]?.id || null);
+        setSelectedShotId(normalizedShots[0]?.id || null);
         setApiStatus('connected');
         if (notify) pushNotice('success', `Episode ${episodeId} 已加载。`);
       } catch (error: any) {
@@ -716,11 +769,15 @@ const App: React.FC = () => {
       createZip={createZip}
       setCreateZip={setCreateZip}
       isElectronRuntime={isElectronRuntime}
+      apiStatus={apiStatus}
     />
   );
 
   return (
-    <div className="relative flex h-screen w-full overflow-hidden bg-[#0f1115] text-slate-300 font-sans">
+    <div
+      data-theme-mode={themeMode}
+      className="relative flex h-screen w-full overflow-hidden bg-[#0f1115] text-slate-300 font-sans"
+    >
       {isWideLayout ? sidebarNode : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -762,13 +819,6 @@ const App: React.FC = () => {
           </div>
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-            <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1">
-              <span className={`w-2 h-2 rounded-full ${statusMeta[apiStatus].dot}`} />
-              <span className={`text-[9px] font-black uppercase tracking-widest ${statusMeta[apiStatus].textTone}`}>
-                {statusMeta[apiStatus].text}
-              </span>
-            </div>
-
             {!isWideLayout && (
               <button
                 onClick={() => {
@@ -784,12 +834,21 @@ const App: React.FC = () => {
             )}
 
             <button
-              onClick={() => setShowOnboarding(true)}
-              className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[10px] font-black tracking-wide flex items-center gap-2"
-              title="重新打开首日上手引导"
+              onClick={() => setThemeMode((prev) => (prev === 'dark' ? 'light' : 'dark'))}
+              className="h-8 w-8 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 flex items-center justify-center"
+              title={themeMode === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
+              aria-label={themeMode === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
             >
-              <BookOpenText size={14} />
-              引导
+              {themeMode === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
+
+            <button
+              onClick={() => setShowOnboarding(true)}
+              className="h-8 w-8 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 flex items-center justify-center"
+              title="重新打开首日上手引导"
+              aria-label="重新打开首日上手引导"
+            >
+              <BookOpenText size={15} />
             </button>
 
             <button
@@ -797,11 +856,11 @@ const App: React.FC = () => {
                 setShowSettings(false);
                 setShowShortcuts((prev) => !prev);
               }}
-              className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[10px] font-black tracking-wide flex items-center gap-2"
+              className="h-8 w-8 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 flex items-center justify-center"
               title="快捷键与工作流提示"
+              aria-label="快捷键与工作流提示"
             >
-              <Keyboard size={14} />
-              快捷键
+              <Keyboard size={15} />
             </button>
 
             <button
@@ -832,18 +891,34 @@ const App: React.FC = () => {
                 const currentShot = shots.find((sh) => sh.id === selectedShot.id);
                 const historyItem = currentShot?.history?.[i];
                 if (!historyItem) return;
+                const restoredLayout = normalizeGridLayout(historyItem.gridLayout, currentShot?.gridLayout);
+                const restoredCellCount = getGridCellCount(restoredLayout);
                 updateShot(selectedShot.id, {
+                  gridLayout: restoredLayout,
                   generatedImageUrl: historyItem.imageUrl,
-                  splitImages: historyItem.splitImages,
-                  matrixPrompts: [...historyItem.prompts],
+                  splitImages: normalizeIndexedList<string>(historyItem.splitImages, restoredCellCount, ''),
+                  matrixPrompts: ensurePromptListLength(historyItem.prompts, restoredLayout),
+                  videoUrls: normalizeIndexedList<string | null>(historyItem.videoUrls, restoredCellCount, null),
+                  videoStatus: Array(restoredCellCount).fill('idle'),
+                  animaticVideoUrl: undefined,
                 });
               }}
               onAddGlobalAsset={(type, name, desc) => {
                 const id = `ast-${Date.now()}`;
                 setConfig((prev) => ({ ...prev, [type]: [...prev[type], { id, name, description: desc || '' }] }));
               }}
-              onDeleteGlobalAsset={() => {}}
-              onUpdateGlobalAsset={() => {}}
+              onDeleteGlobalAsset={(type, id) => {
+                setConfig((prev) => ({
+                  ...prev,
+                  [type]: prev[type].filter((item) => item.id !== id),
+                }));
+              }}
+              onUpdateGlobalAsset={(type, id, updates) => {
+                setConfig((prev) => ({
+                  ...prev,
+                  [type]: prev[type].map((item) => (item.id === id ? { ...item, ...updates } : item)),
+                }));
+              }}
               onOptimizePrompts={async () => {}}
               onAutoLinkAssets={async () => {}}
               isGeneratingPrompts={false}
@@ -865,7 +940,7 @@ const App: React.FC = () => {
             <div className="h-full flex flex-col items-center justify-center gap-5 text-slate-500 px-8">
               <p className="text-[11px] tracking-widest">开始创建你的第一组分镜</p>
               <div className="max-w-xl text-center text-[11px] leading-relaxed text-slate-400">
-                在左侧粘贴剧本，点击 <span className="text-indigo-300 font-bold">拆解脚本</span> 自动拆解镜头，然后在主区域生成矩阵母图与视频预演。
+                在左侧粘贴剧本，点击 <span className="text-indigo-300 font-bold">拆解脚本</span> 自动拆解镜头，然后在主区域生成分镜网格图与视频预演。
               </div>
               <button
                 onClick={() => {
@@ -960,7 +1035,7 @@ const App: React.FC = () => {
                 {[
                   '1. 选择一个示例模板',
                   '2. 一键拆解镜头并自动选中首镜头',
-                  '3. 初始化矩阵 Prompt 后渲染母图',
+                  '3. 先生成分镜提示词，再生成分镜网格图',
                 ].map((step) => (
                   <div key={step} className="rounded-lg border border-white/10 bg-white/5 px-3 py-3 text-[11px] text-slate-300">
                     {step}
@@ -1030,8 +1105,8 @@ const App: React.FC = () => {
                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">建议流程</div>
                 <ul className="space-y-1">
                   <li>1. 先在左侧导入/配置资产并填写 Script。</li>
-                  <li>2. 执行脚本拆解后逐镜头初始化矩阵 Prompt。</li>
-                  <li>3. 渲染母图后再做子机位视频生成，效率更高。</li>
+                  <li>2. 执行脚本拆解后逐镜头生成分镜提示词。</li>
+                  <li>3. 生成分镜网格图后再做子机位视频生成，效率更高。</li>
                   <li>4. 每轮关键改动后保存 Episode，避免会话丢失。</li>
                 </ul>
               </div>

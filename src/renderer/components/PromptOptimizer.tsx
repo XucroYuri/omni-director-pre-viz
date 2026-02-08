@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { Shot, PromptOptimization } from '@shared/types';
+import { normalizeGridLayout } from '@shared/utils';
 import { 
   X, Wand2, Loader2, MessageSquare, 
   Sparkles, CheckCircle, RefreshCw, Check,
@@ -19,6 +20,7 @@ const PromptOptimizer: React.FC<PromptOptimizerProps> = ({
   shot, isOptimizing, onOptimize, onApply, onClose
 }) => {
   const optimization = shot.optimization;
+  const gridLayout = normalizeGridLayout(shot.gridLayout);
 
   return (
     <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[150] flex items-center justify-center p-6 animate-in fade-in">
@@ -48,7 +50,9 @@ const PromptOptimizer: React.FC<PromptOptimizerProps> = ({
               <Loader2 size={32} className="text-indigo-400 animate-spin" />
               <div className="text-center">
                 <p className="text-indigo-400 text-[10px] font-bold uppercase tracking-widest">正在扫描电影元数据...</p>
-                <p className="text-slate-600 text-[9px] font-bold uppercase tracking-widest">正在评估 3x3 矩阵一致性...</p>
+                <p className="text-slate-600 text-[9px] font-bold uppercase tracking-widest">
+                  正在评估 {gridLayout.rows}x{gridLayout.cols} 网格一致性...
+                </p>
               </div>
             </div>
           ) : optimization ? (

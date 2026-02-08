@@ -2,7 +2,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { GlobalConfig, VideoGenerationParams } from '../../../shared/types';
-import { buildAssetInjection } from '../../../shared/utils';
+import { buildAssetInjection, ensurePromptListLength, getAngleLabel, normalizeGridLayout } from '../../../shared/utils';
 import { getAihubmixEnv } from './env';
 import { createAssetCollage } from '../../services/assetCollage';
 
@@ -86,25 +86,19 @@ const VIDEO_PRESET_PREFIX = `[视频生成约束/不可省略]
 `;
 
 function buildMatrixVideoPrompt(params: VideoGenerationParams, config: GlobalConfig): string {
-  const prompts = params.shot.matrixPrompts || [];
+  const gridLayout = normalizeGridLayout(params.shot.gridLayout);
+  const prompts = ensurePromptListLength(params.shot.matrixPrompts, gridLayout);
+  const angleLines = prompts.map((prompt, index) => `${getAngleLabel(index)}: ${prompt || ''}`).join('\n');
   const assetInjection = buildAssetInjection(params.shot, config);
   const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
 
   return `[矩阵分镜视频约束]
-- 输入为 3x3 母图（九格镜头）
+- 输入为 ${gridLayout.rows}x${gridLayout.cols} 母图（共 ${gridLayout.rows * gridLayout.cols} 格）
 - 输出为连贯的动态分镜（Animatic），保持角色/场景/道具一致性
-- 镜头节奏从 Angle_01 到 Angle_09
+- 镜头节奏按网格顺序推进（Angle_01 到 Angle_${String(prompts.length).padStart(2, '0')}）
 ${assetLine}
 镜头描述: ${params.shot.visualTranslation}
-Angle_01: ${prompts[0] || ''}
-Angle_02: ${prompts[1] || ''}
-Angle_03: ${prompts[2] || ''}
-Angle_04: ${prompts[3] || ''}
-Angle_05: ${prompts[4] || ''}
-Angle_06: ${prompts[5] || ''}
-Angle_07: ${prompts[6] || ''}
-Angle_08: ${prompts[7] || ''}
-Angle_09: ${prompts[8] || ''}`.trim();
+${angleLines}`.trim();
 }
 
 export async function generateShotVideo(
