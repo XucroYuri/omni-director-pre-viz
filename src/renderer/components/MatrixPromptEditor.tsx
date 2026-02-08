@@ -66,6 +66,45 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
   const hasBoundAssets = boundCharacters.length + boundScenes.length + boundProps.length > 0;
   const hasAssetRefs =
     boundCharacters.some((c) => c.refImage) || boundScenes.some((s) => s.refImage) || boundProps.some((p) => p.refImage);
+  const hasPromptContent = prompts.some((prompt) => prompt.trim().length > 0);
+  const hasAnimaticOutput = Boolean(shot.animaticVideoUrl);
+  const hasAssetVideoOutput = Boolean(shot.assetVideoUrl);
+  const canGenerateAnimatic = hasAnimaticOutput || (Boolean(shot.generatedImageUrl) && !isGeneratingAnimatic);
+  const canGenerateAssetVideo = hasAssetVideoOutput || (hasBoundAssets && hasAssetRefs && !isGeneratingAssetVideo);
+  const canDownloadAll = Boolean(shot.splitImages?.length);
+  const canRenderMatrix = hasPromptContent && !isGeneratingImage;
+
+  const animaticDisabledReason = hasAnimaticOutput
+    ? ''
+    : !shot.generatedImageUrl
+    ? '请先渲染矩阵母图，再生成 Animatic。'
+    : isGeneratingAnimatic
+      ? 'Animatic 正在生成中。'
+      : '';
+
+  const assetVideoDisabledReason = hasAssetVideoOutput
+    ? ''
+    : !hasBoundAssets
+    ? '请先绑定至少一个角色、场景或道具。'
+    : !hasAssetRefs
+      ? '请先为已绑定资产上传参考图。'
+      : isGeneratingAssetVideo
+        ? 'Asset Video 正在生成中。'
+        : '';
+
+  const downloadDisabledReason = !shot.splitImages?.length ? '母图切片未完成，暂无可下载子图。' : '';
+  const renderDisabledReason = !hasPromptContent
+    ? '请先初始化矩阵 Prompt 或手动填写至少一个机位提示词。'
+    : isGeneratingImage
+      ? '矩阵母图正在渲染中。'
+      : '';
+
+  const inlineHints = [
+    !hasBoundAssets ? '未绑定资产：建议先在 Cast/Env 区绑定关键对象，避免生成策略失败。' : '',
+    !shot.generatedImageUrl && !hasAnimaticOutput ? 'Animatic 功能需要先渲染矩阵母图。' : '',
+    hasBoundAssets && !hasAssetRefs && !hasAssetVideoOutput ? 'Asset Video 功能需要已绑定资产具备参考图。' : '',
+    !hasPromptContent ? '当前 Prompt 为空：请先初始化或编辑 Prompt。' : '',
+  ].filter(Boolean);
 
   useEffect(() => {
     handleDiscoverAssets();
@@ -311,8 +350,9 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                 handleGenerateAnimatic();
               }
             }}
-            disabled={!shot.generatedImageUrl || isGeneratingAnimatic}
+            disabled={!canGenerateAnimatic}
             className="h-9 px-4 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+            title={animaticDisabledReason}
           >
             {isGeneratingAnimatic ? <Loader2 size={14} className="animate-spin" /> : <Film size={14} />}
             {shot.animaticVideoUrl ? 'Animatic Preview' : 'Generate Animatic'}
@@ -325,13 +365,19 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                 handleGenerateAssetVideo();
               }
             }}
-            disabled={!hasAssetRefs || isGeneratingAssetVideo}
+            disabled={!canGenerateAssetVideo}
             className="h-9 px-4 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+            title={assetVideoDisabledReason}
           >
             {isGeneratingAssetVideo ? <Loader2 size={14} className="animate-spin" /> : <Layers size={14} />}
             {shot.assetVideoUrl ? 'Asset Video Preview' : 'Asset Video'}
           </button>
-          <button onClick={handleBatchDownload} disabled={!shot.splitImages} className="h-9 px-4 bg-white/5 border border-white/10 text-slate-400 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2">
+          <button
+            onClick={handleBatchDownload}
+            disabled={!canDownloadAll}
+            className="h-9 px-4 bg-white/5 border border-white/10 text-slate-400 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+            title={downloadDisabledReason}
+          >
             <Download size={14} /> Download All
           </button>
           <div className="h-6 w-px bg-white/10" />
@@ -339,12 +385,31 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             {isPromptingAll ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
             初始化矩阵 (Initialize)
           </button>
-          <button onClick={onGenerateImage} disabled={isGeneratingImage || prompts.every(p => !p)} className="px-6 h-9 bg-slate-100 text-black hover:bg-indigo-500 hover:text-white disabled:opacity-20 rounded-lg text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-2 shadow-xl">
+          <button
+            onClick={onGenerateImage}
+            disabled={!canRenderMatrix}
+            className="px-6 h-9 bg-slate-100 text-black hover:bg-indigo-500 hover:text-white disabled:opacity-20 rounded-lg text-[11px] font-black uppercase tracking-widest transition-all flex items-center gap-2 shadow-xl"
+            title={renderDisabledReason}
+          >
             {isGeneratingImage ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} />}
             渲染矩阵母图
           </button>
         </div>
       </div>
+
+      {inlineHints.length > 0 && (
+        <div className="border-b border-white/10 bg-amber-500/10 px-6 py-2 flex flex-wrap items-center gap-2 shrink-0">
+          <span className="text-[9px] font-black uppercase tracking-widest text-amber-300">提示</span>
+          {inlineHints.map((hint) => (
+            <span
+              key={hint}
+              className="text-[9px] font-medium text-amber-200 bg-black/30 border border-amber-300/20 rounded-full px-2 py-0.5"
+            >
+              {hint}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* AI 提案 */}
       {discoveredAssets.length > 0 && (
@@ -432,7 +497,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                       onClick={() => openVideoModal(idx)}
                       disabled={isVideoBusy}
                       className={`p-1.5 rounded-lg border border-white/10 backdrop-blur-md transition-all ${videoStatus === 'completed' ? 'bg-emerald-500 text-white' : 'bg-black/60 text-slate-200 hover:bg-indigo-600'}`}
-                      title="生成视频预演 (Sora-2)"
+                      title={isVideoBusy ? `当前机位视频状态：${statusLabel}` : '生成视频预演 (Sora-2)'}
                     >
                       {isVideoBusy ? <Loader2 size={12} className="animate-spin"/> : <Video size={12}/>}
                     </button>

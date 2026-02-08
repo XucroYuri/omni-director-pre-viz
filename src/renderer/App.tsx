@@ -1,14 +1,9 @@
-
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import MatrixPromptEditor from './components/MatrixPromptEditor';
 import { DBTask, GlobalConfig, Shot, ScriptBreakdownResponse } from '@shared/types';
 import { DEFAULT_STYLE } from '@shared/constants';
-import { 
-  FileText, Terminal, Settings, X, RefreshCw, Zap, Clock, 
-  CheckCircle2, AlertCircle, Loader2, Cpu, Monitor, FastForward,
-  Database, Layout, Sparkles
-} from 'lucide-react';
+import { AlertCircle, CheckCircle2, Cpu, Info, Keyboard, Settings, X } from 'lucide-react';
 import { breakdownScript } from './services/geminiService';
 
 const STORAGE_KEYS = {
@@ -16,8 +11,64 @@ const STORAGE_KEYS = {
   SCRIPT: 'OMNI_DIRECTOR_SCRIPT',
   BREAKDOWN: 'OMNI_DIRECTOR_BREAKDOWN',
   SELECTED_SHOT_ID: 'OMNI_DIRECTOR_SELECTED_ID',
-  EPISODE_ID: 'OMNI_DIRECTOR_EPISODE_ID'
+  EPISODE_ID: 'OMNI_DIRECTOR_EPISODE_ID',
+  ONBOARDING_DISMISSED: 'OMNI_DIRECTOR_ONBOARDING_DISMISSED',
 };
+
+type ApiStatus = 'connected' | 'error' | 'idle';
+type NoticeTone = 'success' | 'error' | 'info';
+type ScriptTemplate = { id: string; name: string; script: string };
+
+type UiNotice = {
+  id: string;
+  tone: NoticeTone;
+  message: string;
+};
+
+const SCRIPT_TEMPLATES: ScriptTemplate[] = [
+  {
+    id: 'neo-noir-chase',
+    name: 'Neo-noir 夜间追逐',
+    script: [
+      'EXT. RAINY ALLEY - NIGHT',
+      '霓虹灯反射在积水里，主角在狭窄巷道疾跑，身后传来急促脚步声。',
+      '',
+      'INT. SUBWAY ENTRANCE - CONTINUOUS',
+      '主角冲进地铁入口，回头确认追兵位置，呼吸急促，镜头切到近景汗水与紧握的手。',
+      '',
+      'EXT. OVERPASS - LATER',
+      '高架桥下车流穿梭，主角停下观察出口，远处警灯闪烁，空气压迫感增强。',
+    ].join('\n'),
+  },
+  {
+    id: 'sci-fi-lab',
+    name: '科幻实验室异常',
+    script: [
+      'INT. RESEARCH LAB - NIGHT',
+      '无菌实验室内，蓝白冷光照亮控制台，研究员盯着能量读数迅速攀升。',
+      '',
+      'INT. REACTOR CHAMBER - MOMENTS LATER',
+      '反应舱内部出现不稳定脉冲，警报灯闪烁，机械臂开始异常抖动。',
+      '',
+      'INT. CONTROL ROOM - CONTINUOUS',
+      '团队争分夺秒输入应急指令，主控屏幕弹出“临界阈值已突破”。',
+    ].join('\n'),
+  },
+  {
+    id: 'period-drama',
+    name: '古典庭院对峙',
+    script: [
+      'EXT. COURTYARD - DUSK',
+      '古宅庭院薄雾弥漫，女主缓步进入回廊，手持信笺，神情克制。',
+      '',
+      'INT. HALLWAY - CONTINUOUS',
+      '男主在长廊尽头停下脚步，两人隔着灯影对视，空气中充满未言明的 tension。',
+      '',
+      'EXT. COURTYARD GATE - LATER',
+      '风吹动门帘，马车轮声由远及近，家族长辈现身，局势骤然紧张。',
+    ].join('\n'),
+  },
+];
 
 function safeJsonParse<T>(value: string | null, fallback: T): T {
   if (!value) return fallback;
@@ -42,6 +93,8 @@ function isNonEmptyString(value: unknown): value is string {
 }
 
 const App: React.FC = () => {
+  const isElectronRuntime = Boolean(window.api?.app);
+
   const [config, setConfig] = useState<GlobalConfig>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.CONFIG);
     const parsed = safeJsonParse<GlobalConfig | null>(saved, null);
@@ -60,7 +113,7 @@ const App: React.FC = () => {
       characters: [],
       scenes: [],
       props: [],
-      apiProvider: 'aihubmix'
+      apiProvider: 'aihubmix',
     };
   });
 
@@ -82,7 +135,9 @@ const App: React.FC = () => {
       })),
     };
   });
-  const [selectedShotId, setSelectedShotId] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.SELECTED_SHOT_ID) || null);
+  const [selectedShotId, setSelectedShotId] = useState<string | null>(
+    () => localStorage.getItem(STORAGE_KEYS.SELECTED_SHOT_ID) || null,
+  );
   const [episodeId, setEpisodeId] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.EPISODE_ID);
     if (saved) return saved;
@@ -90,15 +145,44 @@ const App: React.FC = () => {
   });
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isSavingEpisode, setIsSavingEpisode] = useState(false);
+  const [isLoadingEpisode, setIsLoadingEpisode] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isAutoLinking, setIsAutoLinking] = useState(false);
-  const [apiStatus, setApiStatus] = useState<'connected' | 'error' | 'idle'>('idle');
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [apiStatus, setApiStatus] = useState<ApiStatus>('idle');
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [notices, setNotices] = useState<UiNotice[]>([]);
+
   const isReloadingRef = useRef(false);
-  const persistTimers = useRef<{ config?: number; script?: number; breakdown?: number; selected?: number }>(
-    {},
+  const hasInitializedOnboardingRef = useRef(false);
+  const noticeTimersRef = useRef<Map<string, number>>(new Map());
+  const persistTimers = useRef<{ config?: number; script?: number; breakdown?: number; selected?: number }>({});
+
+  const shots = breakdown?.shots || [];
+  const selectedShot = useMemo(
+    () => shots.find((shot) => shot.id === selectedShotId) || null,
+    [shots, selectedShotId],
   );
+
+  const statusMeta: Record<ApiStatus, { text: string; dot: string; textTone: string }> = {
+    connected: {
+      text: 'Services Ready',
+      dot: 'bg-emerald-500',
+      textTone: 'text-emerald-300',
+    },
+    error: {
+      text: 'Action Required',
+      dot: 'bg-red-500',
+      textTone: 'text-red-300',
+    },
+    idle: {
+      text: 'Standby',
+      dot: 'bg-slate-500',
+      textTone: 'text-slate-300',
+    },
+  };
 
   const normalizePolicyError = (message: string) => {
     if (!message) return message;
@@ -107,6 +191,57 @@ const App: React.FC = () => {
     if (message.includes('Missing Character')) return '生成失败：请先绑定角色，或将镜头标记为 ENV 纯环境。';
     return '生成失败：未满足资产绑定规则。';
   };
+
+  const dismissNotice = useCallback((id: string) => {
+    setNotices((prev) => prev.filter((notice) => notice.id !== id));
+    const timer = noticeTimersRef.current.get(id);
+    if (timer) {
+      window.clearTimeout(timer);
+      noticeTimersRef.current.delete(id);
+    }
+  }, []);
+
+  const pushNotice = useCallback(
+    (tone: NoticeTone, message: string) => {
+      const id = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+      setNotices((prev) => [...prev, { id, tone, message }]);
+      const timer = window.setTimeout(() => {
+        dismissNotice(id);
+      }, 5200);
+      noticeTimersRef.current.set(id, timer);
+    },
+    [dismissNotice],
+  );
+
+  const persistOnboardingDismissed = useCallback(() => {
+    localStorage.setItem(STORAGE_KEYS.ONBOARDING_DISMISSED, '1');
+  }, []);
+
+  const hideOnboarding = useCallback(
+    (persist = true) => {
+      setShowOnboarding(false);
+      if (persist) {
+        persistOnboardingDismissed();
+      }
+    },
+    [persistOnboardingDismissed],
+  );
+
+  useEffect(() => {
+    return () => {
+      noticeTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      noticeTimersRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (hasInitializedOnboardingRef.current) return;
+    hasInitializedOnboardingRef.current = true;
+    const dismissed = localStorage.getItem(STORAGE_KEYS.ONBOARDING_DISMISSED) === '1';
+    if (!dismissed && !script.trim() && shots.length === 0) {
+      setShowOnboarding(true);
+    }
+  }, [script, shots.length]);
 
   useEffect(() => {
     const timer = persistTimers.current.config;
@@ -186,106 +321,173 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.EPISODE_ID, episodeId);
   }, [episodeId]);
 
+  useEffect(() => {
+    if (shots.length === 0) {
+      if (selectedShotId !== null) setSelectedShotId(null);
+      return;
+    }
+    if (!selectedShotId || !selectedShot) {
+      setSelectedShotId(shots[0].id);
+    }
+  }, [shots, selectedShot, selectedShotId]);
+
   const updateShot = (id: string, updates: Partial<Shot>) => {
-    setBreakdown(prev => {
+    setBreakdown((prev) => {
       if (!prev) return null;
-      return { ...prev, shots: prev.shots.map(s => s.id === id ? { ...s, ...updates } : s) };
+      return { ...prev, shots: prev.shots.map((s) => (s.id === id ? { ...s, ...updates } : s)) };
     });
   };
 
-  const handleGenerateImage = async (shotId: string) => {
-    const shot = breakdown?.shots.find(s => s.id === shotId);
-    if (!shot || isGeneratingImage) return;
-    if (!window.api?.app?.task?.submit) {
-      alert('任务队列仅在 Electron 环境可用。');
-      return;
-    }
+  const handleGenerateImage = useCallback(
+    async (shotId: string) => {
+      const shot = shots.find((s) => s.id === shotId);
+      if (!shot || isGeneratingImage) return;
+      if (!window.api?.app?.task?.submit) {
+        pushNotice('error', '当前运行在浏览器预览模式，任务队列仅在 Electron 桌面端可用。');
+        return;
+      }
 
-    setIsGeneratingImage(true);
-    setErrorMessage(null);
+      setIsGeneratingImage(true);
 
-    try {
-      const now = Date.now();
-      const taskId =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `task_${now}_${Math.random().toString(16).slice(2, 10)}`;
+      try {
+        const now = Date.now();
+        const taskId =
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `task_${now}_${Math.random().toString(16).slice(2, 10)}`;
 
-      const sanitizeAssets = <T extends { refImage?: string }>(items: T[]) =>
-        items.map(({ refImage, ...rest }) => rest);
+        const sanitizeAssets = <T extends { refImage?: string }>(items: T[]) =>
+          items.map(({ refImage, ...rest }) => rest);
 
-      const taskShot = {
-        id: shot.id,
-        originalText: shot.originalText,
-        visualTranslation: shot.visualTranslation,
-        contextTag: shot.contextTag,
-        shotKind: shot.shotKind,
-        matrixPrompts: shot.matrixPrompts,
-        characterIds: shot.characterIds,
-        sceneIds: shot.sceneIds,
-        propIds: shot.propIds,
-      };
+        const taskShot = {
+          id: shot.id,
+          originalText: shot.originalText,
+          visualTranslation: shot.visualTranslation,
+          contextTag: shot.contextTag,
+          shotKind: shot.shotKind,
+          matrixPrompts: shot.matrixPrompts,
+          characterIds: shot.characterIds,
+          sceneIds: shot.sceneIds,
+          propIds: shot.propIds,
+        };
 
-      const taskConfig = {
-        ...config,
-        characters: sanitizeAssets(config.characters),
-        scenes: sanitizeAssets(config.scenes),
-        props: sanitizeAssets(config.props),
-      };
+        const taskConfig = {
+          ...config,
+          characters: sanitizeAssets(config.characters),
+          scenes: sanitizeAssets(config.scenes),
+          props: sanitizeAssets(config.props),
+        };
 
-      const payload = {
-        jobKind: 'MATRIX_GEN',
-        shot: taskShot,
-        config: taskConfig,
-      };
+        const payload = {
+          jobKind: 'MATRIX_GEN',
+          shot: taskShot,
+          config: taskConfig,
+        };
 
-      const task: DBTask = {
-        id: taskId,
-        episode_id: episodeId,
-        shot_id: shot.id,
-        type: 'IMAGE',
-        status: 'queued',
-        progress: 0,
-        payload_json: JSON.stringify(payload),
-        result_json: '',
-        error: null,
-        created_at: now,
-        updated_at: now,
-      };
+        const task: DBTask = {
+          id: taskId,
+          episode_id: episodeId,
+          shot_id: shot.id,
+          type: 'IMAGE',
+          status: 'queued',
+          progress: 0,
+          payload_json: JSON.stringify(payload),
+          result_json: '',
+          error: null,
+          created_at: now,
+          updated_at: now,
+        };
 
-      await window.api.app.task.submit(task);
-      updateShot(shotId, { status: 'processing', lastAccessedAt: now });
-      setApiStatus('connected');
-    } catch (error: any) {
-      const message = typeof error?.message === 'string' ? error.message : 'Unknown error';
-      setErrorMessage(normalizePolicyError(message));
-      setApiStatus('error');
-    } finally {
-      setIsGeneratingImage(false);
-    }
-  };
+        await window.api.app.task.submit(task);
+        updateShot(shotId, { status: 'processing', lastAccessedAt: now });
+        setApiStatus('connected');
+        pushNotice('info', '镜头渲染任务已加入队列。');
+      } catch (error: any) {
+        const message = typeof error?.message === 'string' ? error.message : 'Unknown error';
+        pushNotice('error', normalizePolicyError(message));
+        setApiStatus('error');
+      } finally {
+        setIsGeneratingImage(false);
+      }
+    },
+    [config, episodeId, isGeneratingImage, pushNotice, shots],
+  );
 
-  const handleBreakdown = async () => {
-    if (!script.trim()) return;
-    setIsLoading(true);
-    setErrorMessage(null);
-    try {
-      const result = await breakdownScript(script, config);
-      setBreakdown(result);
-      if (result.shots.length > 0) setSelectedShotId(result.shots[0].id);
-      setApiStatus('connected');
-    } catch (error: any) {
-      setErrorMessage(error.message);
-      setApiStatus('error');
-    } finally { setIsLoading(false); }
-  };
+  const runBreakdownForScript = useCallback(
+    async (sourceScript: string, sourceLabel = '脚本') => {
+      const trimmed = sourceScript.trim();
+      if (!trimmed) {
+        pushNotice('info', '请先输入剧本文本，再执行 Breakdown。');
+        return false;
+      }
 
-  const handleSaveEpisode = async () => {
+      if (!window.api?.ai?.breakdownScript) {
+        pushNotice('error', '脚本拆解仅在 Electron 桌面端可用，请使用 `npm run dev` 启动。');
+        setApiStatus('error');
+        return false;
+      }
+
+      setIsLoading(true);
+      try {
+        const result = await breakdownScript(trimmed, config);
+        setBreakdown(result);
+        if (result.shots.length > 0) {
+          setSelectedShotId(result.shots[0].id);
+        }
+        setApiStatus('connected');
+        pushNotice('success', `${sourceLabel}拆解完成：共生成 ${result.shots.length} 个镜头。`);
+        return true;
+      } catch (error: any) {
+        pushNotice('error', error?.message || '脚本拆解失败，请稍后重试。');
+        setApiStatus('error');
+        return false;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [config, pushNotice],
+  );
+
+  const handleBreakdown = useCallback(async () => {
+    await runBreakdownForScript(script, '脚本');
+  }, [runBreakdownForScript, script]);
+
+  const handleApplyScriptTemplate = useCallback(
+    (templateId: string) => {
+      const template = SCRIPT_TEMPLATES.find((item) => item.id === templateId);
+      if (!template) {
+        pushNotice('error', '未找到指定模板。');
+        return;
+      }
+      setScript(template.script);
+      setApiStatus('idle');
+      pushNotice('info', `已填充模板：${template.name}。`);
+    },
+    [pushNotice],
+  );
+
+  const handleQuickStart = useCallback(
+    async (templateId?: string) => {
+      const template =
+        SCRIPT_TEMPLATES.find((item) => item.id === templateId) || SCRIPT_TEMPLATES[0];
+      if (!template) return;
+      setScript(template.script);
+      const success = await runBreakdownForScript(template.script, `模板《${template.name}》`);
+      if (success) {
+        hideOnboarding();
+        pushNotice('info', '下一步：点击「初始化矩阵」后再渲染母图。');
+      }
+    },
+    [hideOnboarding, pushNotice, runBreakdownForScript],
+  );
+
+  const handleSaveEpisode = useCallback(async () => {
+    if (isSavingEpisode) return;
     if (!window.api?.app?.db) {
-      alert('DB 功能仅在 Electron 环境可用。');
+      pushNotice('error', '数据库读写仅在 Electron 桌面端可用。');
       return;
     }
-    const shots = breakdown?.shots || [];
+
     const data = {
       episodeId,
       config,
@@ -296,24 +498,37 @@ const App: React.FC = () => {
         props: config.props,
       },
     };
+
+    setIsSavingEpisode(true);
     try {
       await window.api.app.db.saveEpisode(data);
-      alert('保存成功（Save to DB）。');
+      pushNotice('success', `Episode ${episodeId} 已保存。`);
+      setApiStatus('connected');
     } catch (error: any) {
-      alert(`保存失败: ${error?.message || error}`);
+      pushNotice('error', `保存失败：${error?.message || error}`);
+      setApiStatus('error');
+    } finally {
+      setIsSavingEpisode(false);
     }
-  };
+  }, [config, episodeId, isSavingEpisode, pushNotice, shots]);
 
   const reloadEpisode = useCallback(
-    async (options?: { notify?: boolean }) => {
+    async (options?: { notify?: boolean; markBusy?: boolean }) => {
+      const { notify = false, markBusy = false } = options || {};
+
       if (!window.api?.app?.db) {
-        if (options?.notify) alert('DB 功能仅在 Electron 环境可用。');
+        if (notify) pushNotice('error', '数据库读写仅在 Electron 桌面端可用。');
         return;
       }
+
+      if (markBusy) {
+        setIsLoadingEpisode(true);
+      }
+
       try {
         const data = await window.api.app.db.loadEpisode(episodeId);
         if (!data) {
-          if (options?.notify) alert('未找到对应 Episode。');
+          if (notify) pushNotice('info', `未找到 Episode：${episodeId}`);
           return;
         }
         setConfig(data.config);
@@ -324,16 +539,22 @@ const App: React.FC = () => {
         });
         setSelectedShotId(data.shots[0]?.id || null);
         setApiStatus('connected');
+        if (notify) pushNotice('success', `Episode ${episodeId} 已加载。`);
       } catch (error: any) {
-        if (options?.notify) alert(`读取失败: ${error?.message || error}`);
+        if (notify) pushNotice('error', `读取失败：${error?.message || error}`);
+        setApiStatus('error');
+      } finally {
+        if (markBusy) {
+          setIsLoadingEpisode(false);
+        }
       }
     },
-    [episodeId],
+    [episodeId, pushNotice],
   );
 
-  const handleLoadEpisode = async () => {
-    await reloadEpisode({ notify: true });
-  };
+  const handleLoadEpisode = useCallback(async () => {
+    await reloadEpisode({ notify: true, markBusy: true });
+  }, [reloadEpisode]);
 
   useEffect(() => {
     const taskApi = window.api?.app?.task;
@@ -355,60 +576,318 @@ const App: React.FC = () => {
     return () => taskApi.offUpdate(handleUpdate);
   }, [episodeId, reloadEpisode]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping =
+        target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable === true;
+      const isPrimary = event.metaKey || event.ctrlKey;
+
+      if (event.key === 'Escape') {
+        setShowShortcuts(false);
+      }
+
+      if (!isPrimary || isTyping) return;
+
+      if (event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        handleSaveEpisode().catch((error) => {
+          console.error('Save shortcut failed', error);
+        });
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        handleBreakdown().catch((error) => {
+          console.error('Breakdown shortcut failed', error);
+        });
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [handleBreakdown, handleSaveEpisode]);
+
+  const quickStartDisabledReason = !isElectronRuntime
+    ? '一键跑通依赖 AI 拆解能力，仅在 Electron 桌面端可用。'
+    : '';
+
   return (
     <div className="flex h-screen w-full bg-[#0f1115] text-slate-300 overflow-hidden font-sans">
-      <Sidebar 
-        config={config} setConfig={setConfig} 
-        shots={breakdown?.shots || []} 
-        selectedShotId={selectedShotId} 
-        setSelectedShotId={setSelectedShotId} 
-        isLoading={isLoading} script={script} setScript={setScript} 
+      <Sidebar
+        config={config}
+        setConfig={setConfig}
+        shots={shots}
+        selectedShotId={selectedShotId}
+        setSelectedShotId={setSelectedShotId}
+        isLoading={isLoading}
+        script={script}
+        setScript={setScript}
         handleBreakdown={handleBreakdown}
         episodeId={episodeId}
         setEpisodeId={setEpisodeId}
         onSaveEpisode={handleSaveEpisode}
         onLoadEpisode={handleLoadEpisode}
+        isSavingEpisode={isSavingEpisode}
+        isLoadingEpisode={isLoadingEpisode}
+        isElectronRuntime={isElectronRuntime}
+        notify={pushNotice}
+        scriptTemplates={SCRIPT_TEMPLATES}
+        onApplyScriptTemplate={handleApplyScriptTemplate}
+        onQuickStart={handleQuickStart}
       />
+
       <div className="flex-1 flex flex-col">
+        {!isElectronRuntime && (
+          <div className="h-10 px-6 border-b border-amber-400/20 bg-amber-500/10 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-amber-200 text-[10px] font-bold uppercase tracking-widest">
+              <Info size={12} /> Browser Preview Mode
+            </div>
+            <span className="text-[10px] text-amber-200/80">
+              任务队列、数据库和导出功能在 Electron 桌面端生效。
+            </span>
+          </div>
+        )}
+
         <header className="h-14 border-b border-white/10 flex items-center justify-between px-6 bg-[#16191f]/80 backdrop-blur-md">
-           <div className="flex items-center gap-4">
-              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center"><Cpu size={18} className="text-white" /></div>
-              <h1 className="text-sm font-black text-white tracking-widest uppercase">Omni Director <span className="text-indigo-500">v5.0</span></h1>
-           </div>
-           <div className="flex items-center gap-4">
-              <div className={`w-2 h-2 rounded-full ${apiStatus === 'connected' ? 'bg-emerald-500' : 'bg-slate-600'}`} />
-              <button onClick={() => {}} className="p-2 text-slate-500 hover:text-white"><Settings size={20} /></button>
-           </div>
+          <div className="flex items-center gap-4">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+              <Cpu size={18} className="text-white" />
+            </div>
+            <div className="flex flex-col">
+              <h1 className="text-sm font-black text-white tracking-widest uppercase">
+                Omni Director <span className="text-indigo-500">v5.0</span>
+              </h1>
+              <span className="text-[9px] text-slate-500 uppercase tracking-widest">Pre-visualization Workstation</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1">
+              <span className={`w-2 h-2 rounded-full ${statusMeta[apiStatus].dot}`} />
+              <span className={`text-[9px] font-black uppercase tracking-widest ${statusMeta[apiStatus].textTone}`}>
+                {statusMeta[apiStatus].text}
+              </span>
+            </div>
+
+            <button
+              onClick={() => setShowShortcuts((prev) => !prev)}
+              className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[9px] font-black uppercase tracking-widest flex items-center gap-2"
+              title="快捷键与工作流提示"
+            >
+              <Keyboard size={14} />
+              Tips
+            </button>
+
+            <button
+              onClick={() => setShowShortcuts((prev) => !prev)}
+              className="p-2 text-slate-500 hover:text-white"
+              title="帮助与设置"
+            >
+              <Settings size={18} />
+            </button>
+          </div>
         </header>
+
         <main className="flex-1 overflow-hidden">
-          {selectedShotId ? (
-            <MatrixPromptEditor 
-              shot={breakdown!.shots.find(s => s.id === selectedShotId)!}
-              allShots={breakdown!.shots} config={config}
+          {selectedShot ? (
+            <MatrixPromptEditor
+              shot={selectedShot}
+              allShots={shots}
+              config={config}
               episodeId={episodeId}
-              onUpdatePrompts={(p) => updateShot(selectedShotId, { matrixPrompts: p })}
-              onUpdateShot={(u) => updateShot(selectedShotId, u)}
-              onGenerateImage={() => handleGenerateImage(selectedShotId)}
+              onUpdatePrompts={(p) => updateShot(selectedShot.id, { matrixPrompts: p })}
+              onUpdateShot={(u) => updateShot(selectedShot.id, u)}
+              onGenerateImage={() => handleGenerateImage(selectedShot.id)}
               onRestoreHistory={(i) => {
-                const s = breakdown!.shots.find(sh => sh.id === selectedShotId)!;
-                const h = s.history![i];
-                updateShot(selectedShotId, { generatedImageUrl: h.imageUrl, splitImages: h.splitImages, matrixPrompts: [...h.prompts] });
+                const currentShot = shots.find((sh) => sh.id === selectedShot.id);
+                const historyItem = currentShot?.history?.[i];
+                if (!historyItem) return;
+                updateShot(selectedShot.id, {
+                  generatedImageUrl: historyItem.imageUrl,
+                  splitImages: historyItem.splitImages,
+                  matrixPrompts: [...historyItem.prompts],
+                });
               }}
               onAddGlobalAsset={(type, name, desc) => {
                 const id = `ast-${Date.now()}`;
-                setConfig(prev => ({ ...prev, [type]: [...prev[type], { id, name, description: desc || '' }] }));
+                setConfig((prev) => ({ ...prev, [type]: [...prev[type], { id, name, description: desc || '' }] }));
               }}
-              onDeleteGlobalAsset={() => {}} onUpdateGlobalAsset={() => {}} 
-              onOptimizePrompts={async () => {}} onAutoLinkAssets={async () => {}}
-              isGeneratingPrompts={false} isGeneratingImage={isGeneratingImage}
-              isOptimizing={isOptimizing} isAutoLinking={isAutoLinking}
+              onDeleteGlobalAsset={() => {}}
+              onUpdateGlobalAsset={() => {}}
+              onOptimizePrompts={async () => {}}
+              onAutoLinkAssets={async () => {}}
+              isGeneratingPrompts={false}
+              isGeneratingImage={isGeneratingImage}
+              isOptimizing={isOptimizing}
+              isAutoLinking={isAutoLinking}
             />
+          ) : shots.length > 0 ? (
+            <div className="h-full flex flex-col items-center justify-center gap-4 text-slate-500 px-8">
+              <p className="text-[11px] uppercase tracking-widest">当前未选中镜头</p>
+              <button
+                onClick={() => setSelectedShotId(shots[0].id)}
+                className="h-10 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest"
+              >
+                选中第一个镜头
+              </button>
+            </div>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-slate-600 uppercase text-[10px] tracking-widest">Select a shot to begin</div>
+            <div className="h-full flex flex-col items-center justify-center gap-5 text-slate-500 px-8">
+              <p className="text-[11px] uppercase tracking-widest">开始创建你的第一组分镜</p>
+              <div className="max-w-xl text-center text-[11px] leading-relaxed text-slate-400">
+                在左侧粘贴剧本，点击 <span className="text-indigo-300 font-bold">Breakdown</span> 自动拆解镜头，然后在主区域生成矩阵母图与视频预演。
+              </div>
+              <button
+                onClick={() => {
+                  if (!isElectronRuntime) return;
+                  if (script.trim()) {
+                    handleBreakdown().catch((error) => {
+                      console.error('Breakdown failed', error);
+                    });
+                  } else {
+                    handleQuickStart().catch((error) => {
+                      console.error('Quick start failed', error);
+                    });
+                  }
+                }}
+                disabled={!isElectronRuntime || isLoading}
+                className="h-10 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-40 disabled:hover:bg-indigo-600"
+                title={quickStartDisabledReason}
+              >
+                一键跑通首个镜头
+              </button>
+              {!isElectronRuntime && (
+                <p className="text-[10px] text-amber-300 text-center">
+                  当前为浏览器预览模式，请使用 Electron 桌面端执行 AI 拆解与一键跑通。
+                </p>
+              )}
+            </div>
           )}
         </main>
       </div>
-      {errorMessage && <div className="fixed bottom-6 right-6 bg-red-950 border border-red-500 p-4 rounded-lg z-[300] flex items-center gap-3"><AlertCircle className="text-red-500" /><p className="text-xs">{errorMessage}</p><button onClick={() => setErrorMessage(null)}><X size={14}/></button></div>}
+
+      {notices.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-[320] flex flex-col gap-2 max-w-[420px]">
+          {notices.map((notice) => {
+            const toneClass =
+              notice.tone === 'success'
+                ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-100'
+                : notice.tone === 'error'
+                  ? 'border-red-400/40 bg-red-500/15 text-red-100'
+                  : 'border-indigo-400/40 bg-indigo-500/15 text-indigo-100';
+            const Icon = notice.tone === 'success' ? CheckCircle2 : notice.tone === 'error' ? AlertCircle : Info;
+
+            return (
+              <div key={notice.id} className={`rounded-lg border px-3 py-2 shadow-xl ${toneClass}`} role="status" aria-live="polite">
+                <div className="flex items-start gap-2">
+                  <Icon size={14} className="shrink-0 mt-0.5" />
+                  <p className="text-[11px] leading-relaxed flex-1">{notice.message}</p>
+                  <button onClick={() => dismissNotice(notice.id)} className="text-current/70 hover:text-current">
+                    <X size={12} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {showOnboarding && (
+        <div className="fixed inset-0 z-[330] bg-black/75 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="w-full max-w-4xl rounded-2xl border border-white/10 bg-[#121722] shadow-2xl overflow-hidden">
+            <div className="h-14 px-6 border-b border-white/10 flex items-center justify-between">
+              <div className="text-[11px] font-black uppercase tracking-widest text-white">首日上手引导</div>
+              <button onClick={() => hideOnboarding()} className="text-slate-400 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {[
+                  '1. 选择一个示例模板',
+                  '2. 一键拆解镜头并自动选中首镜头',
+                  '3. 初始化矩阵 Prompt 后渲染母图',
+                ].map((step) => (
+                  <div key={step} className="rounded-lg border border-white/10 bg-white/5 px-3 py-3 text-[11px] text-slate-300">
+                    {step}
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {SCRIPT_TEMPLATES.map((template) => (
+                  <button
+                    key={template.id}
+                    onClick={() => {
+                      handleApplyScriptTemplate(template.id);
+                    }}
+                    className="text-left rounded-lg border border-white/10 bg-black/30 p-4 hover:border-indigo-400/40 hover:bg-indigo-500/10 transition-all"
+                  >
+                    <div className="text-[10px] font-black uppercase tracking-widest text-indigo-300 mb-2">{template.name}</div>
+                    <div className="text-[11px] text-slate-300 line-clamp-4 whitespace-pre-line">{template.script}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="h-14 px-6 border-t border-white/10 bg-[#0f131d] flex items-center justify-between">
+              <button
+                onClick={() => hideOnboarding()}
+                className="h-9 px-4 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[10px] font-black uppercase tracking-widest"
+              >
+                稍后再说
+              </button>
+              <button
+                onClick={() => {
+                  if (!isElectronRuntime) return;
+                  handleQuickStart().catch((error) => {
+                    console.error('Quick start from onboarding failed', error);
+                  });
+                }}
+                disabled={!isElectronRuntime || isLoading}
+                className="h-9 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-40 disabled:hover:bg-indigo-600"
+                title={quickStartDisabledReason}
+              >
+                使用默认模板一键跑通
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showShortcuts && (
+        <div className="fixed inset-0 z-[310] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="w-full max-w-2xl rounded-xl border border-white/10 bg-[#151922] shadow-2xl overflow-hidden">
+            <div className="h-12 px-5 border-b border-white/10 flex items-center justify-between">
+              <div className="text-[11px] font-black uppercase tracking-widest text-white">Workflow Tips</div>
+              <button onClick={() => setShowShortcuts(false)} className="text-slate-400 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-5 space-y-5 text-[11px] text-slate-300">
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">快捷键</div>
+                <ul className="space-y-1">
+                  <li><span className="text-indigo-300 font-bold">Ctrl/Cmd + Enter</span>：执行脚本 Breakdown</li>
+                  <li><span className="text-indigo-300 font-bold">Ctrl/Cmd + S</span>：保存当前 Episode 到数据库</li>
+                  <li><span className="text-indigo-300 font-bold">Esc</span>：关闭当前提示面板</li>
+                </ul>
+              </div>
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">建议流程</div>
+                <ul className="space-y-1">
+                  <li>1. 先在左侧导入/配置资产并填写 Script。</li>
+                  <li>2. 执行 Breakdown 后逐镜头初始化矩阵 Prompt。</li>
+                  <li>3. 渲染母图后再做子机位视频生成，效率更高。</li>
+                  <li>4. 每轮关键改动后保存 Episode，避免会话丢失。</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

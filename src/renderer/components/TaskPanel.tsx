@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Clock, Loader2, RefreshCw, StopCircle, XCircle } from 'lucide-react';
 import type { DBTask, TaskStatus, TaskType } from '@shared/types';
 
@@ -29,6 +29,16 @@ const TaskPanel: React.FC = () => {
   const [tasks, setTasks] = useState<DBTask[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const toastTimers = useRef<Map<string, number>>(new Map());
+  const taskApiAvailable = Boolean(window.api?.app?.task?.list);
+  const orderedTasks = useMemo(() => [...tasks].sort((a, b) => b.updated_at - a.updated_at), [tasks]);
+  const summary = useMemo(
+    () => ({
+      running: tasks.filter((task) => task.status === 'running').length,
+      failed: tasks.filter((task) => task.status === 'failed').length,
+      queued: tasks.filter((task) => task.status === 'queued').length,
+    }),
+    [tasks],
+  );
 
   useEffect(() => {
     let active = true;
@@ -165,7 +175,7 @@ const TaskPanel: React.FC = () => {
   return (
     <section className="mt-4 bg-slate-500/5 rounded-xl border border-white/10 p-4">
       {toasts.length > 0 && (
-        <div className="fixed top-4 right-4 z-50 space-y-2">
+        <div className="fixed top-4 right-4 z-50 space-y-2" role="status" aria-live="polite">
           {toasts.map((toast) => (
             <div
               key={toast.id}
@@ -182,13 +192,23 @@ const TaskPanel: React.FC = () => {
       )}
       <div className="flex items-center justify-between mb-3">
         <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">Task Queue</span>
+        {taskApiAvailable && (
+          <span className="text-[9px] text-slate-500">
+            Q:{summary.queued} / R:{summary.running} / F:{summary.failed}
+          </span>
+        )}
       </div>
 
+      {!taskApiAvailable ? (
+        <div className="text-[10px] text-amber-300 py-2">
+          浏览器预览模式下任务队列不可用，请在 Electron 桌面端运行。
+        </div>
+      ) : (
       <div className="max-h-[300px] overflow-y-auto custom-scrollbar space-y-2">
         {tasks.length === 0 ? (
           <div className="text-[10px] text-slate-500 py-2">No tasks yet.</div>
         ) : (
-          tasks.map((task) => {
+          orderedTasks.map((task) => {
             const progress =
               task.status === 'running' && typeof task.progress === 'number'
                 ? Math.max(0, Math.min(1, task.progress))
@@ -257,6 +277,7 @@ const TaskPanel: React.FC = () => {
           })
         )}
       </div>
+      )}
     </section>
   );
 };

@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { GlobalConfig, Shot } from '@shared/types';
 import { 
   Plus, User, Database, Palette, Sparkles, Loader2,
@@ -9,6 +9,19 @@ import {
 } from 'lucide-react';
 import { enhanceAssetDescription, generateAssetImage } from '../services/geminiService';
 import TaskPanel from './TaskPanel';
+
+type NoticeTone = 'success' | 'error' | 'info';
+type AssetKind = 'characters' | 'scenes' | 'props';
+type ScriptTemplateOption = { id: string; name: string; script: string };
+
+type PendingDelete = {
+  token: string;
+  type: AssetKind;
+  item: any;
+  index: number;
+};
+
+const UNDO_WINDOW_MS = 8000;
 
 interface SidebarProps {
   config: GlobalConfig;
@@ -22,15 +35,24 @@ interface SidebarProps {
   handleBreakdown: () => void;
   episodeId: string;
   setEpisodeId: (id: string) => void;
-  onSaveEpisode: () => void;
-  onLoadEpisode: () => void;
+  onSaveEpisode: () => Promise<void> | void;
+  onLoadEpisode: () => Promise<void> | void;
+  isSavingEpisode?: boolean;
+  isLoadingEpisode?: boolean;
+  isElectronRuntime: boolean;
+  notify?: (tone: NoticeTone, message: string) => void;
+  scriptTemplates: ScriptTemplateOption[];
+  onApplyScriptTemplate: (templateId: string) => void;
+  onQuickStart: (templateId?: string) => void;
 }
 
 type SortOption = 'name' | 'newest';
 
 const Sidebar: React.FC<SidebarProps> = ({ 
   config, setConfig, shots, selectedShotId, setSelectedShotId, 
-  isLoading, script, setScript, handleBreakdown, episodeId, setEpisodeId, onSaveEpisode, onLoadEpisode
+  isLoading, script, setScript, handleBreakdown, episodeId, setEpisodeId, onSaveEpisode, onLoadEpisode,
+  isSavingEpisode = false, isLoadingEpisode = false, isElectronRuntime, notify,
+  scriptTemplates, onApplyScriptTemplate, onQuickStart,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -40,7 +62,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [isGeneratingAssetId, setIsGeneratingAssetId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [createZip, setCreateZip] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState(() => scriptTemplates[0]?.id || '');
   const [expanded, setExpanded] = useState({ style: true, characters: true, scenes: true, props: true, setup: false });
+  const undoTimerRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const toggle = (s: keyof typeof expanded) => setExpanded(p => ({ ...p, [s]: !p[s] }));
@@ -73,6 +98,38 @@ const Sidebar: React.FC<SidebarProps> = ({
   } as const;
 
   const selectedShot = useMemo(() => shots.find(s => s.id === selectedShotId), [shots, selectedShotId]);
+  const renderedShotCount = useMemo(() => shots.filter((shot) => Boolean(shot.generatedImageUrl)).length, [shots]);
+
+  const pushNotice = (tone: NoticeTone, message: string) => {
+    if (notify) {
+      notify(tone, message);
+      return;
+    }
+    if (tone === 'error') {
+      console.error(message);
+    } else {
+      console.info(message);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedTemplateId && scriptTemplates.length > 0) {
+      setSelectedTemplateId(scriptTemplates[0].id);
+      return;
+    }
+    const stillExists = scriptTemplates.some((template) => template.id === selectedTemplateId);
+    if (!stillExists) {
+      setSelectedTemplateId(scriptTemplates[0]?.id || '');
+    }
+  }, [scriptTemplates, selectedTemplateId]);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) {
+        window.clearTimeout(undoTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleExport = () => {
     const data = {
@@ -119,9 +176,9 @@ const Sidebar: React.FC<SidebarProps> = ({
             props: merge(prev.props, importedData.props)
           };
         });
-        alert('资产库导入成功（增量合并已完成）');
+        pushNotice('success', '资产库导入成功（已完成增量合并）。');
       } catch (err: any) {
-        alert(`导入失败: ${err.message}`);
+        pushNotice('error', `导入失败：${err.message}`);
       }
     };
     reader.readAsText(file);
@@ -133,8 +190,48 @@ const Sidebar: React.FC<SidebarProps> = ({
     setConfig(prev => ({ ...prev, [type]: [next, ...prev[type]] }));
   };
 
-  const removeItem = (type: 'characters' | 'scenes' | 'props', id: string) => {
-    if (confirm('确定删除此资产？')) setConfig(prev => ({ ...prev, [type]: prev[type].filter(x => x.id !== id) }));
+  const schedulePendingDeleteExpiry = (token: string) => {
+    if (undoTimerRef.current) {
+      window.clearTimeout(undoTimerRef.current);
+    }
+    undoTimerRef.current = window.setTimeout(() => {
+      setPendingDelete((current) => (current?.token === token ? null : current));
+      undoTimerRef.current = null;
+    }, UNDO_WINDOW_MS);
+  };
+
+  const handleUndoDelete = () => {
+    if (!pendingDelete) return;
+    const rollback = pendingDelete;
+    if (undoTimerRef.current) {
+      window.clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    setConfig((prev) => {
+      const list = [...(prev[rollback.type] as any[])];
+      const alreadyExists = list.some((item: any) => item.id === rollback.item.id);
+      if (!alreadyExists) {
+        const insertAt = Math.min(Math.max(rollback.index, 0), list.length);
+        list.splice(insertAt, 0, rollback.item);
+      }
+      return { ...prev, [rollback.type]: list } as GlobalConfig;
+    });
+    setPendingDelete(null);
+    pushNotice('success', `已撤销删除：${rollback.item.name}`);
+  };
+
+  const removeItem = (type: AssetKind, id: string) => {
+    const currentList = config[type];
+    const index = currentList.findIndex((item) => item.id === id);
+    if (index === -1) return;
+
+    const item = currentList[index];
+    setConfig((prev) => ({ ...prev, [type]: prev[type].filter((asset) => asset.id !== id) }));
+
+    const token = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    setPendingDelete({ token, type, item, index });
+    schedulePendingDeleteExpiry(token);
+    pushNotice('info', `已删除资产「${item.name}」，可在 ${Math.floor(UNDO_WINDOW_MS / 1000)} 秒内撤销。`);
   };
 
   const updateItem = (type: 'characters' | 'scenes' | 'props', id: string, u: any) => {
@@ -157,8 +254,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   const handleFileUpload = (type: 'characters' | 'scenes' | 'props', id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!window.api?.app?.media?.putBytes) {
-      alert('媒体写入仅在 Electron 环境可用。');
+    if (!isElectronRuntime || !window.api?.app?.media?.putBytes) {
+      pushNotice('error', '媒体上传仅在 Electron 桌面端可用。');
       return;
     }
     (async () => {
@@ -168,8 +265,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         const relativeBase = `episodes/${episodeId}/assets/${id}/ref_upload`;
         const url = await window.api!.app.media.putBytes({ bytes, mimeType, relativeBase });
         updateItem(type, id, { refImage: url });
+        pushNotice('success', '参考图上传成功。');
       } catch (err: any) {
-        alert(`上传失败: ${err?.message || err}`);
+        pushNotice('error', `上传失败：${err?.message || err}`);
       } finally {
         e.target.value = '';
       }
@@ -183,7 +281,10 @@ const Sidebar: React.FC<SidebarProps> = ({
     try {
       const enhanced = await enhanceAssetDescription(item.name, item.description);
       updateItem(type, id, { description: enhanced });
-    } catch (err) { console.error(err); } finally { setIsEnhancingId(null); }
+      pushNotice('success', 'AI 描述增强完成。');
+    } catch (err: any) {
+      pushNotice('error', `AI 增强失败：${err?.message || err}`);
+    } finally { setIsEnhancingId(null); }
   };
 
   const handleGenerateAssetRef = async (type: 'characters' | 'scenes' | 'props', id: string) => {
@@ -194,8 +295,9 @@ const Sidebar: React.FC<SidebarProps> = ({
     try {
       const imageUrl = await generateAssetImage(item.name, item.description || 'Professional cinematic concept art', config);
       updateItem(type, id, { refImage: imageUrl });
-    } catch (err) {
-      console.error("Asset generation failed", err);
+      pushNotice('success', 'AI 参考图生成完成。');
+    } catch (err: any) {
+      pushNotice('error', `参考图生成失败：${err?.message || err}`);
     } finally {
       setIsGeneratingAssetId(null);
     }
@@ -203,33 +305,36 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const handleExportEpisode = async () => {
     if (isExporting) return;
-    if (!window.api?.app) {
-      alert('Export requires the Electron app runtime (window.api is not available).');
+    if (!isElectronRuntime || !window.api?.app) {
+      pushNotice('error', '导出仅在 Electron 桌面端可用。');
       return;
     }
-    const exportShots = shots.filter((shot) => shot.generatedImageUrl);
+    const exportShots = shots.filter((shot) => Boolean(shot.generatedImageUrl));
     if (exportShots.length === 0) {
-      alert('没有可导出的镜头（请先生成母图）。');
+      pushNotice('info', '当前没有可导出的镜头，请先生成母图。');
       return;
     }
 
-    const episodeId = `EP_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+    const exportEpisodeId = `EP_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
     setIsExporting(true);
     try {
       const result = await window.api.app.exportEpisode({
-        episodeId,
+        episodeId: exportEpisodeId,
         shots: exportShots,
         config,
         includeVideos: true,
         createZip: createZip,
       });
       if (result.success) {
-        alert(`导出成功！\n路径: ${result.outputPath}\n${result.zipPath ? `ZIP: ${result.zipPath}` : ''}`);
+        pushNotice(
+          'success',
+          `导出成功：${result.outputPath}${result.zipPath ? `（ZIP: ${result.zipPath}）` : ''}`,
+        );
       } else {
-        alert(`导出失败: ${result.error}`);
+        pushNotice('error', `导出失败：${result.error}`);
       }
     } catch (err: any) {
-      alert(`系统错误: ${err.message || err}`);
+      pushNotice('error', `系统错误：${err.message || err}`);
     } finally {
       setIsExporting(false);
     }
@@ -392,7 +497,21 @@ const Sidebar: React.FC<SidebarProps> = ({
     return { c: process(config.characters), s: process(config.scenes), p: process(config.props) };
   }, [config, searchTerm, selectedTags, sortOption]);
 
-  const isEmpty = config.characters.length === 0 && config.scenes.length === 0 && config.props.length === 0;
+  const canExportEpisode = isElectronRuntime && renderedShotCount > 0 && !isExporting;
+  const canRunBreakdown = isElectronRuntime && !isLoading && Boolean(script.trim());
+  const exportDisabledReason = !isElectronRuntime
+    ? '导出仅支持 Electron 桌面端。'
+    : renderedShotCount === 0
+      ? '请先至少渲染一个镜头。'
+      : '';
+  const breakdownDisabledReason = !isElectronRuntime
+    ? '脚本拆解仅在 Electron 桌面端可用。'
+    : !script.trim()
+      ? '请先输入剧本内容。'
+      : '';
+  const quickStartDisabledReason = !isElectronRuntime
+    ? '一键跑通依赖 AI 拆解能力，仅在 Electron 桌面端可用。'
+    : '';
 
   return (
     <div className={`h-full bg-[#16191f] border-r border-white/10 flex flex-col transition-all duration-300 shadow-2xl ${collapsed ? 'w-16' : 'w-80'}`}>
@@ -417,7 +536,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
                   <FileText size={14} className="text-indigo-400" /> Script Editor
                 </span>
-                <button onClick={handleBreakdown} disabled={isLoading || !script.trim()} className="text-[10px] font-black text-indigo-400 hover:text-white transition-all uppercase tracking-tight bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20 hover:bg-indigo-500/30">
+                <button
+                  onClick={handleBreakdown}
+                  disabled={!canRunBreakdown}
+                  className="text-[10px] font-black text-indigo-400 hover:text-white transition-all uppercase tracking-tight bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20 hover:bg-indigo-500/30 disabled:opacity-40 disabled:hover:text-indigo-400 disabled:hover:bg-indigo-500/10"
+                  title={breakdownDisabledReason}
+                >
                   {isLoading ? 'Processing...' : 'Breakdown'}
                 </button>
               </div>
@@ -425,6 +549,43 @@ const Sidebar: React.FC<SidebarProps> = ({
                 className="h-32 bg-transparent p-4 text-[12px] leading-relaxed text-slate-200 outline-none resize-none placeholder:text-slate-700 font-medium"
                 value={script} onChange={(e) => setScript(e.target.value)} placeholder="Paste screenplay here to begin AI breakdown..."
               />
+
+              <div className="px-4 pb-4 bg-black/20 border-t border-white/10 space-y-2">
+                <div className="text-[9px] font-black uppercase tracking-widest text-slate-500">首日模板</div>
+                <div className="grid grid-cols-[1fr_auto_auto] gap-2">
+                  <select
+                    value={selectedTemplateId}
+                    onChange={(e) => setSelectedTemplateId(e.target.value)}
+                    className="h-9 bg-black/40 border border-white/10 rounded-lg px-2 text-[10px] text-slate-200 outline-none focus:border-indigo-500/40"
+                  >
+                    {scriptTemplates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => onApplyScriptTemplate(selectedTemplateId)}
+                    disabled={!selectedTemplateId}
+                    className="h-9 px-3 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[9px] font-black uppercase tracking-widest disabled:opacity-40"
+                  >
+                    填充模板
+                  </button>
+                  <button
+                    onClick={() => onQuickStart(selectedTemplateId)}
+                    disabled={isLoading || !selectedTemplateId || !isElectronRuntime}
+                    className="h-9 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[9px] font-black uppercase tracking-widest disabled:opacity-40"
+                    title={quickStartDisabledReason}
+                  >
+                    一键跑通
+                  </button>
+                </div>
+                {!isElectronRuntime && (
+                  <p className="text-[10px] text-amber-300">
+                    预览模式可填充模板，但 AI 拆解与一键跑通需在 Electron 桌面端执行。
+                  </p>
+                )}
+              </div>
               
               <div className="border-t border-white/10 flex flex-col bg-black/40">
                 <div className="p-4 border-b border-white/10 flex items-center justify-between">
@@ -496,6 +657,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 </div>
               </div>
+
+              {pendingDelete && (
+                <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 flex items-center justify-between gap-3">
+                  <div className="text-[10px] text-amber-200 truncate">
+                    已删除 <span className="font-bold">{pendingDelete.item.name}</span>，可撤销。
+                  </div>
+                  <button
+                    onClick={handleUndoDelete}
+                    className="h-7 px-2 rounded-md bg-amber-400/20 border border-amber-300/40 text-amber-100 hover:bg-amber-300/30 text-[9px] font-black uppercase tracking-widest shrink-0"
+                  >
+                    Undo
+                  </button>
+                </div>
+              )}
 
               <section className="bg-slate-500/5 rounded-xl border border-white/10 p-4">
                 <div className="flex items-center justify-between mb-4 cursor-pointer group" onClick={() => toggle('setup')}>
@@ -575,6 +750,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <Package size={14} className="text-slate-300" />
                   <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">Delivery</span>
                 </div>
+                <div className="mb-2 text-[10px] text-slate-500">
+                  可导出镜头：<span className="text-slate-300 font-bold">{renderedShotCount}</span>
+                </div>
                 <div className="flex items-center gap-2 mb-3 px-1">
                   <input
                     type="checkbox"
@@ -589,12 +767,16 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </div>
                 <button
                   onClick={handleExportEpisode}
-                  disabled={isExporting}
-                  className="w-full h-9 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  disabled={!canExportEpisode}
+                  className="w-full h-9 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:hover:bg-indigo-600"
+                  title={exportDisabledReason}
                 >
                   {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                   Export Episode
                 </button>
+                {exportDisabledReason ? (
+                  <p className="mt-2 text-[10px] text-amber-300">{exportDisabledReason}</p>
+                ) : null}
               </section>
 
               <section className="bg-slate-500/5 rounded-xl border border-white/10 p-4">
@@ -602,6 +784,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <Database size={14} className="text-slate-300" />
                   <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">Database</span>
                 </div>
+                {!isElectronRuntime ? (
+                  <p className="mb-3 text-[10px] text-amber-300">当前为浏览器预览模式，数据库功能不可用。</p>
+                ) : null}
                 <div className="mb-3">
                   <label className="text-[9px] font-black uppercase tracking-widest text-slate-500">
                     Episode ID
@@ -609,21 +794,24 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <input
                     value={episodeId}
                     onChange={(e) => setEpisodeId(e.target.value)}
-                    className="mt-2 w-full bg-black/40 border border-white/10 rounded-lg py-2 px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40"
+                    className="mt-2 w-full bg-black/40 border border-white/10 rounded-lg py-2 px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40 disabled:opacity-60"
+                    disabled={!isElectronRuntime || isSavingEpisode || isLoadingEpisode}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={onLoadEpisode}
-                    className="h-9 bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+                    disabled={!isElectronRuntime || isSavingEpisode || isLoadingEpisode}
+                    className="h-9 bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-white/5"
                   >
-                    Import
+                    {isLoadingEpisode ? 'Loading...' : 'Import'}
                   </button>
                   <button
                     onClick={onSaveEpisode}
-                    className="h-9 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+                    disabled={!isElectronRuntime || isSavingEpisode || isLoadingEpisode}
+                    className="h-9 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-indigo-600"
                   >
-                    Save
+                    {isSavingEpisode ? 'Saving...' : 'Save'}
                   </button>
                 </div>
               </section>
