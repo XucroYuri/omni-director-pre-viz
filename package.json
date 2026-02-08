@@ -10,7 +10,7 @@
     "phase9:web:install": "npm --prefix apps/web install",
     "phase9:web:setup": "node scripts/phase9-web-setup.cjs",
     "phase9:web:db:init": "npm --prefix apps/web run db:init",
-    "phase9:web:dev": "npm --prefix apps/web run dev",
+    "phase9:web:dev": "npm --prefix apps/web run dev -- --port 3100",
     "phase9:web:dev:with-worker": "concurrently \"npm:phase9:web:dev\" \"npm:phase9:web:worker\"",
     "phase9:web:build": "npm --prefix apps/web run build",
     "phase9:web:clean": "npm --prefix apps/web run clean",

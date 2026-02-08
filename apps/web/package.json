@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "next dev --port 3100",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start --port 3100",
     "db:init": "node scripts/init-db.mjs",
