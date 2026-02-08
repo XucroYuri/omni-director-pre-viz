@@ -18,7 +18,7 @@ export class TaskQueue {
   }
 
   dequeue(): DBTask | undefined {
-    return this.queue.pop();
+    return this.queue.shift();
   }
 
   restore(): void {
@@ -29,6 +29,8 @@ export class TaskQueue {
         const resetTask: DBTask = {
           ...task,
           status: 'queued',
+          progress: null,
+          error: null,
           updated_at: Date.now(),
         };
         this.queue.push(resetTask);
@@ -51,7 +53,7 @@ export class TaskQueue {
   }
 
   peek(): DBTask | undefined {
-    return this.queue[this.queue.length - 1];
+    return this.queue[0];
   }
 
   size(): number {

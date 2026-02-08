@@ -75,7 +75,7 @@ export class TaskRunner {
         const episodeId = (payload.episodeId ?? payload.episode_id) as string | undefined;
         const shotId = (payload.shotId ?? payload.shot_id) as string | undefined;
         if (!episodeId || !shotId) throw new Error('VIDEO_GEN requires episodeId and shotId');
-        const episode = await dbService.loadEpisode(episodeId);
+        const episode = await dbService.loadEpisode(episodeId, { mediaFormat: 'dataUri' });
         if (!episode) throw new Error(`Episode not found: ${episodeId}`);
         const shot = episode.shots.find((s) => s.id === shotId);
         if (!shot) throw new Error(`Shot not found: ${shotId}`);
@@ -151,25 +151,35 @@ export class TaskRunner {
     const { outputDir } = getAihubmixEnv();
     await fs.mkdir(path.join(outputDir, 'images'), { recursive: true });
 
-    const results: string[] = [];
+    const tiles: Array<{ index: number; left: number; top: number; width: number; height: number }> = [];
     for (let row = 0; row < 3; row += 1) {
       for (let col = 0; col < 3; col += 1) {
         const left = col * cellWidth;
         const top = row * cellHeight;
         const extractWidth = col === 2 ? width - left : cellWidth;
         const extractHeight = row === 2 ? height - top : cellHeight;
-        const buffer = await sharp(gridPath)
-          .extract({ left, top, width: extractWidth, height: extractHeight })
-          .png()
-          .toBuffer();
         const index = row * 3 + col + 1;
-        const hash = crypto.createHash('sha1').update(buffer).digest('hex').slice(0, 10);
-        const filePath = path.join(outputDir, 'images', `split_${shotId}_${this.pad2(index)}_${hash}.png`);
-        await fs.writeFile(filePath, buffer);
-        results.push(filePath);
+        tiles.push({ index, left, top, width: extractWidth, height: extractHeight });
       }
     }
-    return results;
+
+    const results = await Promise.all(
+      tiles.map(async (tile) => {
+        const buffer = await image
+          .clone()
+          .extract({ left: tile.left, top: tile.top, width: tile.width, height: tile.height })
+          .png()
+          .toBuffer();
+        const hash = crypto.createHash('sha1').update(buffer).digest('hex').slice(0, 10);
+        const filePath = path.join(outputDir, 'images', `split_${shotId}_${this.pad2(tile.index)}_${hash}.png`);
+        await fs.writeFile(filePath, buffer);
+        return { index: tile.index, filePath };
+      }),
+    );
+
+    return results
+      .sort((a, b) => a.index - b.index)
+      .map((item) => item.filePath);
   }
 
   private updateShotVideoPath(
