@@ -32,6 +32,13 @@ type NoticeTone = 'success' | 'error' | 'info';
 type ScriptTemplate = { id: string; name: string; script: string };
 type ThemeMode = 'dark' | 'light';
 type ViewMode = 'project' | 'workspace';
+type LayoutTier = 'wide' | 'medium' | 'compact';
+
+function getLayoutTier(width: number): LayoutTier {
+  if (width >= 1536) return 'wide';
+  if (width >= 1200) return 'medium';
+  return 'compact';
+}
 
 type UiNotice = {
   id: string;
@@ -216,6 +223,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingEpisode, setIsSavingEpisode] = useState(false);
   const [isLoadingEpisode, setIsLoadingEpisode] = useState(false);
+  const [isAutoSaving, setIsAutoSaving] = useState(false);
+  const [lastAutoSavedAt, setLastAutoSavedAt] = useState<number | null>(null);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [createZip, setCreateZip] = useState(false);
@@ -224,10 +233,14 @@ const App: React.FC = () => {
   const [apiStatus, setApiStatus] = useState<ApiStatus>('idle');
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showLeftDrawer, setShowLeftDrawer] = useState(false);
-  const [showRightDrawer, setShowRightDrawer] = useState(false);
-  const [isWideLayout, setIsWideLayout] = useState(() =>
-    typeof window !== 'undefined' ? window.innerWidth >= 1536 : true,
+  const [layoutTier, setLayoutTier] = useState<LayoutTier>(() =>
+    typeof window !== 'undefined' ? getLayoutTier(window.innerWidth) : 'wide',
+  );
+  const [showLeftDrawer, setShowLeftDrawer] = useState(() =>
+    typeof window !== 'undefined' ? getLayoutTier(window.innerWidth) !== 'compact' : true,
+  );
+  const [showRightDrawer, setShowRightDrawer] = useState(() =>
+    typeof window !== 'undefined' ? getLayoutTier(window.innerWidth) === 'wide' : true,
   );
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.THEME_MODE);
@@ -239,6 +252,8 @@ const App: React.FC = () => {
   const isReloadingRef = useRef(false);
   const hasInitializedOnboardingRef = useRef(false);
   const noticeTimersRef = useRef<Map<string, number>>(new Map());
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const lastPersistedSnapshotRef = useRef('');
   const persistTimers = useRef<{
     config?: number;
     script?: number;
@@ -250,6 +265,7 @@ const App: React.FC = () => {
   }>({});
 
   const shots = breakdown?.shots || [];
+  const isProjectMode = viewMode === 'project';
   const selectedShot = useMemo(
     () => shots.find((shot) => shot.id === selectedShotId) || null,
     [shots, selectedShotId],
@@ -317,6 +333,9 @@ const App: React.FC = () => {
     return () => {
       noticeTimersRef.current.forEach((timer) => window.clearTimeout(timer));
       noticeTimersRef.current.clear();
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+      }
     };
   }, []);
 
@@ -345,7 +364,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const onResize = () => {
-      setIsWideLayout(window.innerWidth >= 1536);
+      setLayoutTier(getLayoutTier(window.innerWidth));
     };
     onResize();
     window.addEventListener('resize', onResize);
@@ -355,11 +374,20 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (isWideLayout) {
-      setShowLeftDrawer(false);
-      setShowRightDrawer(false);
+    if (isProjectMode) return;
+    if (layoutTier === 'wide') {
+      setShowLeftDrawer(true);
+      setShowRightDrawer(true);
+      return;
     }
-  }, [isWideLayout]);
+    if (layoutTier === 'medium') {
+      setShowLeftDrawer(true);
+      setShowRightDrawer(false);
+      return;
+    }
+    setShowLeftDrawer(false);
+    setShowRightDrawer(false);
+  }, [isProjectMode, layoutTier]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.THEME_MODE, themeMode);
@@ -700,14 +728,8 @@ const App: React.FC = () => {
     }
   }, [config, createZip, isElectronRuntime, isExporting, pushNotice, shots]);
 
-  const handleSaveEpisode = useCallback(async () => {
-    if (isSavingEpisode) return;
-    if (!window.api?.app?.db) {
-      pushNotice('error', '数据库读写仅在 Electron 桌面端可用。');
-      return;
-    }
-
-    const data = {
+  const buildEpisodePayload = useCallback(() => {
+    return {
       episodeId,
       projectId: selectedProjectId || undefined,
       title: episodeTitle,
@@ -724,10 +746,23 @@ const App: React.FC = () => {
         props: config.props,
       },
     };
+  }, [breakdown, config, episodeId, episodeTitle, script, selectedProjectId, shots]);
+
+  const handleSaveEpisode = useCallback(async () => {
+    if (isSavingEpisode) return;
+    if (!window.api?.app?.db) {
+      pushNotice('error', '数据库读写仅在 Electron 桌面端可用。');
+      return;
+    }
+
+    const data = buildEpisodePayload();
+    const snapshot = JSON.stringify(data);
 
     setIsSavingEpisode(true);
     try {
       await window.api.app.db.saveEpisode(data);
+      lastPersistedSnapshotRef.current = snapshot;
+      setLastAutoSavedAt(Date.now());
       pushNotice('success', `Episode ${episodeId} 已保存。`);
       setApiStatus('connected');
       refreshProjects().catch(() => {});
@@ -737,7 +772,7 @@ const App: React.FC = () => {
     } finally {
       setIsSavingEpisode(false);
     }
-  }, [breakdown, config, episodeId, episodeTitle, isSavingEpisode, pushNotice, refreshProjects, script, selectedProjectId, shots]);
+  }, [buildEpisodePayload, episodeId, isSavingEpisode, pushNotice, refreshProjects]);
 
   const reloadEpisode = useCallback(
     async (options?: { notify?: boolean; markBusy?: boolean; episodeId?: string }) => {
@@ -776,6 +811,20 @@ const App: React.FC = () => {
         setSelectedShotId(normalizedShots[0]?.id || null);
         setViewMode('workspace');
         setApiStatus('connected');
+        lastPersistedSnapshotRef.current = JSON.stringify({
+          episodeId: data.episodeId,
+          projectId: data.projectId || selectedProjectId || undefined,
+          title: data.title || `第 ${data.episodeNo || 1} 集`,
+          script: data.script || '',
+          context: data.context || '',
+          scriptOverview: data.scriptOverview,
+          sceneTable: data.sceneTable,
+          beatTable: data.beatTable,
+          config: data.config,
+          shots: normalizedShots,
+          assets: data.assets,
+        });
+        setLastAutoSavedAt(Date.now());
         if (notify) pushNotice('success', `Episode ${data.episodeId} 已加载。`);
       } catch (error: any) {
         if (notify) pushNotice('error', `读取失败：${error?.message || error}`);
@@ -788,11 +837,6 @@ const App: React.FC = () => {
     },
     [episodeId, pushNotice, selectedProjectId],
   );
-
-  const handleLoadEpisode = useCallback(async () => {
-    await reloadEpisode({ notify: true, markBusy: true });
-    refreshProjects().catch(() => {});
-  }, [refreshProjects, reloadEpisode]);
 
   const handleCreateProject = useCallback(
     async (name: string, description?: string) => {
@@ -843,6 +887,40 @@ const App: React.FC = () => {
     },
     [reloadEpisode],
   );
+
+  useEffect(() => {
+    if (!isElectronRuntime || !window.api?.app?.db) return;
+    if (isProjectMode || isLoading || isLoadingEpisode || isSavingEpisode) return;
+
+    const payload = buildEpisodePayload();
+    const snapshot = JSON.stringify(payload);
+    if (snapshot === lastPersistedSnapshotRef.current) return;
+
+    if (autoSaveTimerRef.current) {
+      window.clearTimeout(autoSaveTimerRef.current);
+    }
+
+    autoSaveTimerRef.current = window.setTimeout(async () => {
+      try {
+        setIsAutoSaving(true);
+        await window.api!.app.db.saveEpisode(payload);
+        lastPersistedSnapshotRef.current = snapshot;
+        setLastAutoSavedAt(Date.now());
+        setApiStatus('connected');
+      } catch (error) {
+        console.error('Auto save failed', error);
+        setApiStatus('error');
+      } finally {
+        setIsAutoSaving(false);
+      }
+    }, 1400);
+
+    return () => {
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [buildEpisodePayload, isElectronRuntime, isLoading, isLoadingEpisode, isProjectMode, isSavingEpisode]);
 
   useEffect(() => {
     const taskApi = window.api?.app?.task;
@@ -903,9 +981,8 @@ const App: React.FC = () => {
   }, [handleBreakdown, handleSaveEpisode]);
 
   const quickStartDisabledReason = !isElectronRuntime
-    ? '一键跑通依赖 AI 拆解能力，仅在 Electron 桌面端可用。'
+    ? '一键跑通依赖 AI 解析能力，仅在 Electron 桌面端可用。'
     : '';
-  const isProjectMode = viewMode === 'project';
 
   const sidebarNode = (
     <Sidebar
@@ -915,7 +992,6 @@ const App: React.FC = () => {
       selectedShotId={selectedShotId}
       setSelectedShotId={(id) => {
         setSelectedShotId(id);
-        if (!isWideLayout) setShowLeftDrawer(false);
       }}
       isLoading={isLoading}
       script={script}
@@ -933,18 +1009,14 @@ const App: React.FC = () => {
   const globalOpsNode = (
     <GlobalOpsPanel
       shots={shots}
-      episodeId={episodeId}
-      setEpisodeId={setEpisodeId}
-      onSaveEpisode={handleSaveEpisode}
-      onLoadEpisode={handleLoadEpisode}
       onExportEpisode={handleExportEpisode}
-      isSavingEpisode={isSavingEpisode}
-      isLoadingEpisode={isLoadingEpisode}
       isExporting={isExporting}
       createZip={createZip}
       setCreateZip={setCreateZip}
       isElectronRuntime={isElectronRuntime}
       apiStatus={apiStatus}
+      isAutoSaving={isAutoSaving}
+      lastAutoSavedAt={lastAutoSavedAt}
     />
   );
 
@@ -965,7 +1037,7 @@ const App: React.FC = () => {
       data-theme-mode={themeMode}
       className="relative flex h-screen w-full overflow-hidden bg-[#0f1115] text-slate-300 font-sans"
     >
-      {isWideLayout && !isProjectMode ? sidebarNode : null}
+      {!isProjectMode && showLeftDrawer ? sidebarNode : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
         {!isElectronRuntime && (
@@ -974,24 +1046,21 @@ const App: React.FC = () => {
               <Info size={12} /> 浏览器预览模式
             </div>
             <span className="text-[10px] text-amber-200/80 leading-relaxed">
-              任务队列、数据库和导出功能在 Electron 桌面端生效。
+              任务队列与交付导出仅在 Electron 桌面端生效。
             </span>
           </div>
         )}
 
         <header className="border-b border-white/10 bg-[#16191f]/80 px-4 py-2 sm:px-6 backdrop-blur-md flex flex-wrap items-center gap-3 justify-between">
           <div className="flex min-w-0 items-center gap-2 sm:gap-4">
-            {!isWideLayout && !isProjectMode && (
+            {!isProjectMode && (
               <button
-                onClick={() => {
-                  setShowRightDrawer(false);
-                  setShowLeftDrawer((prev) => !prev);
-                }}
+                onClick={() => setShowLeftDrawer((prev) => !prev)}
                 className="h-8 px-2 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[10px] font-black tracking-wide flex items-center gap-1.5"
-                title="打开脚本与资产面板"
+                title={showLeftDrawer ? '收起左侧栏' : '展开左侧栏'}
               >
                 <PanelLeft size={14} />
-                资产
+                {showLeftDrawer ? '收起左栏' : '展开左栏'}
               </button>
             )}
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
@@ -1008,17 +1077,14 @@ const App: React.FC = () => {
           </div>
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-            {!isWideLayout && !isProjectMode && (
+            {!isProjectMode && (
               <button
-                onClick={() => {
-                  setShowLeftDrawer(false);
-                  setShowRightDrawer((prev) => !prev);
-                }}
+                onClick={() => setShowRightDrawer((prev) => !prev)}
                 className="h-8 px-2 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[10px] font-black tracking-wide flex items-center gap-1.5"
-                title="打开导出与任务面板"
+                title={showRightDrawer ? '收起右侧栏' : '展开右侧栏'}
               >
                 <PanelRight size={14} />
-                任务
+                {showRightDrawer ? '收起右栏' : '展开右栏'}
               </button>
             )}
 
@@ -1087,7 +1153,6 @@ const App: React.FC = () => {
               allShots={shots}
               config={config}
               episodeId={episodeId}
-              onUpdateConfig={(updates) => setConfig((prev) => ({ ...prev, ...updates }))}
               onUpdatePrompts={(p) => updateShot(selectedShot.id, { matrixPrompts: p })}
               onUpdateShot={(u) => updateShot(selectedShot.id, u)}
               onGenerateImage={() => handleGenerateImage(selectedShot.id)}
@@ -1144,7 +1209,7 @@ const App: React.FC = () => {
             <div className="h-full flex flex-col items-center justify-center gap-5 text-slate-500 px-8">
               <p className="text-[11px] tracking-widest">开始创建你的第一组分镜</p>
               <div className="max-w-xl text-center text-[11px] leading-relaxed text-slate-400">
-                在左侧粘贴剧本，点击 <span className="text-indigo-300 font-bold">拆解脚本</span> 自动拆解镜头，然后在主区域生成分镜网格图与视频预演。
+                在左侧粘贴剧本，点击 <span className="text-indigo-300 font-bold">开始解析剧本</span> 自动拆解镜头，然后在主区域生成分镜网格图与视频预演。
               </div>
               <button
                 onClick={() => {
@@ -1175,29 +1240,7 @@ const App: React.FC = () => {
         </main>
       </div>
 
-      {isWideLayout && !isProjectMode ? globalOpsNode : null}
-
-      {!isWideLayout && !isProjectMode && showLeftDrawer && (
-        <div className="fixed inset-0 z-[250] flex">
-          <button
-            aria-label="关闭左侧面板"
-            className="absolute inset-0 bg-black/65"
-            onClick={() => setShowLeftDrawer(false)}
-          />
-          <div className="relative h-full w-[min(20rem,92vw)]">{sidebarNode}</div>
-        </div>
-      )}
-
-      {!isWideLayout && !isProjectMode && showRightDrawer && (
-        <div className="fixed inset-0 z-[250] flex justify-end">
-          <button
-            aria-label="关闭右侧面板"
-            className="absolute inset-0 bg-black/65"
-            onClick={() => setShowRightDrawer(false)}
-          />
-          <div className="relative h-full w-[min(20rem,92vw)]">{globalOpsNode}</div>
-        </div>
-      )}
+      {!isProjectMode && showRightDrawer ? globalOpsNode : null}
 
       {notices.length > 0 && (
         <div className="fixed bottom-6 right-6 z-[320] flex flex-col gap-2 max-w-[420px]">
@@ -1300,8 +1343,8 @@ const App: React.FC = () => {
               <div>
                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">快捷键</div>
                 <ul className="space-y-1">
-                  <li><span className="text-indigo-300 font-bold">Ctrl/Cmd + Enter</span>：执行脚本拆解</li>
-                  <li><span className="text-indigo-300 font-bold">Ctrl/Cmd + S</span>：保存当前 Episode 到数据库</li>
+                  <li><span className="text-indigo-300 font-bold">Ctrl/Cmd + Enter</span>：执行剧本解析</li>
+                  <li><span className="text-indigo-300 font-bold">Ctrl/Cmd + S</span>：立即保存当前单集</li>
                   <li><span className="text-indigo-300 font-bold">Esc</span>：关闭当前提示面板</li>
                 </ul>
               </div>
@@ -1309,7 +1352,7 @@ const App: React.FC = () => {
                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">建议流程</div>
                 <ul className="space-y-1">
                   <li>1. 先在左侧导入/配置资产并填写 Script。</li>
-                  <li>2. 执行脚本拆解后逐镜头生成分镜提示词。</li>
+                  <li>2. 执行剧本解析后逐镜头生成分镜提示词。</li>
                   <li>3. 生成分镜网格图后再做子机位视频生成，效率更高。</li>
                   <li>4. 每轮关键改动后保存 Episode，避免会话丢失。</li>
                 </ul>

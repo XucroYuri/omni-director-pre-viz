@@ -6,7 +6,7 @@ import {
   Plus, User, Database, Sparkles, Loader2,
   ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen, Trash2, Box, Map,
   Search, X, Hash, Image as ImageIcon, Check, Tag as TagIcon, ArrowUpDown, SortAsc, SortDesc, Clock,
-  FileSearch, Download, Upload, FileJson, Info, FileText, Terminal, CheckCircle2, AlertCircle, Link2, Camera, Eraser, Wand2, LayoutGrid, ScrollText
+  FileSearch, Download, Upload, FileJson, Info, FileText, Terminal, CheckCircle2, AlertCircle, Link2, Camera, Eraser, Wand2, LayoutGrid, ScrollText, SlidersHorizontal
 } from 'lucide-react';
 import { enhanceAssetDescription, generateAssetImage } from '../services/geminiService';
 
@@ -54,6 +54,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [isEnhancingId, setIsEnhancingId] = useState<string | null>(null);
   const [isGeneratingAssetId, setIsGeneratingAssetId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [showGlobalWorkbench, setShowGlobalWorkbench] = useState(false);
   const [expanded, setExpanded] = useState({ characters: true, scenes: true, props: true });
   const undoTimerRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -110,6 +111,12 @@ const Sidebar: React.FC<SidebarProps> = ({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (collapsed) {
+      setShowGlobalWorkbench(false);
+    }
+  }, [collapsed]);
 
   const handleExport = () => {
     const data = {
@@ -449,13 +456,13 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const canRunBreakdown = isElectronRuntime && !isLoading && Boolean(script.trim());
   const breakdownDisabledReason = !isElectronRuntime
-    ? '脚本拆解仅在 Electron 桌面端可用。'
+    ? '剧本解析仅在 Electron 桌面端可用。'
     : !script.trim()
       ? '请先输入剧本内容。'
       : '';
 
   return (
-    <div className={`h-full bg-[#16191f] border-r border-white/10 flex flex-col transition-all duration-300 shadow-2xl ${collapsed ? 'w-16' : 'w-80'}`}>
+    <div className={`h-full shrink-0 bg-[#16191f] border-r border-white/10 flex flex-col transition-all duration-300 shadow-2xl ${collapsed ? 'w-16' : 'w-80'}`}>
       <div className={`h-14 flex items-center border-b border-white/10 ${collapsed ? 'justify-center' : 'justify-between px-4'}`}>
         {!collapsed && (
           <div className="flex items-center gap-3">
@@ -514,12 +521,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                     className="flex-1 min-h-[220px] w-full bg-transparent text-[12px] leading-relaxed text-slate-200 outline-none resize-none placeholder:text-slate-700 font-medium"
                     value={script}
                     onChange={(e) => setScript(e.target.value)}
-                    placeholder="在此粘贴剧本文本，开始 AI 拆解..."
+                    placeholder="在此粘贴剧本文本，开始 AI 解析..."
                   />
                   <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 space-y-1.5">
                     <div className="text-[9px] font-black tracking-widest text-slate-500 uppercase">结构化解析摘要</div>
                     <div className="text-[10px] text-slate-300 leading-relaxed line-clamp-4">
-                      {scriptOverview || '尚未生成剧本概述。执行拆解后可查看全局压缩上下文。'}
+                      {scriptOverview || '尚未生成剧本概述。执行解析后可查看全局压缩上下文。'}
                     </div>
                     <div className="flex items-center gap-3 text-[9px] text-slate-500">
                       <span>场景：{sceneTable?.length || 0}</span>
@@ -529,7 +536,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                   {!isElectronRuntime ? (
                     <p className="mt-2 text-[10px] text-amber-300">
-                      当前为浏览器预览模式，脚本拆解仅在 Electron 桌面端可用。
+                      当前为浏览器预览模式，剧本解析仅在 Electron 桌面端可用。
                     </p>
                   ) : null}
                 </div>
@@ -540,7 +547,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   {shots.length === 0 ? (
                     <div className="h-24 flex flex-col items-center justify-center text-center p-6 space-y-3">
                       <Terminal size={24} className="text-slate-800 opacity-50" />
-                      <span className="text-[9px] font-bold text-slate-700">等待脚本拆解</span>
+                      <span className="text-[9px] font-bold text-slate-700">等待剧本解析</span>
                     </div>
                   ) : (
                     shots.map((shot) => {
@@ -660,15 +667,101 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {!collapsed && (
-        <div className="p-3 border-t border-white/10 bg-[#12151c]">
-          <button
-            onClick={handleBreakdown}
-            disabled={!canRunBreakdown}
-            title={breakdownDisabledReason}
-            className="w-full h-11 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-indigo-600"
-          >
-            {isLoading ? '脚本拆解中...' : '开始拆解脚本'}
-          </button>
+        <div className="relative p-3 border-t border-white/10 bg-[#12151c]">
+          {showGlobalWorkbench && (
+            <div className="absolute bottom-full left-3 right-3 mb-2 rounded-xl border border-white/10 bg-[#11161f] p-3 shadow-2xl">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-[9px] font-black tracking-widest text-slate-300">全局工作台</span>
+                <button
+                  onClick={() => setShowGlobalWorkbench(false)}
+                  className="text-slate-500 hover:text-slate-200"
+                  title="收起全局设置"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <div className="mb-1 text-[9px] font-black tracking-widest text-slate-500">画幅比例</div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(['16:9', '9:16'] as const).map((ratio) => {
+                      const active = config.aspectRatio === ratio;
+                      return (
+                        <button
+                          key={ratio}
+                          onClick={() => setConfig((prev) => ({ ...prev, aspectRatio: ratio }))}
+                          className={`h-8 rounded-lg border text-[10px] font-black transition-all ${
+                            active
+                              ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
+                              : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/30'
+                          }`}
+                        >
+                          {ratio}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-1 text-[9px] font-black tracking-widest text-slate-500">输出分辨率</div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(['1K', '2K', '4K'] as const).map((resolution) => {
+                      const active = config.resolution === resolution;
+                      return (
+                        <button
+                          key={resolution}
+                          onClick={() => setConfig((prev) => ({ ...prev, resolution }))}
+                          className={`h-8 rounded-lg border text-[10px] font-black transition-all ${
+                            active
+                              ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
+                              : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/30'
+                          }`}
+                        >
+                          {resolution}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <label className="block">
+                  <div className="mb-1 text-[9px] font-black tracking-widest text-slate-500">美术风格（全局）</div>
+                  <textarea
+                    rows={3}
+                    value={config.artStyle}
+                    onChange={(event) => setConfig((prev) => ({ ...prev, artStyle: event.target.value }))}
+                    className="w-full resize-none rounded-lg border border-white/10 bg-black/30 px-2 py-2 text-[10px] text-slate-200 outline-none focus:border-indigo-500/40"
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleBreakdown}
+              disabled={!canRunBreakdown}
+              title={breakdownDisabledReason}
+              className="flex-1 h-11 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-indigo-600"
+            >
+              {isLoading ? '剧本解析中...' : '开始解析剧本'}
+            </button>
+
+            <button
+              onClick={() => setShowGlobalWorkbench((prev) => !prev)}
+              className={`h-11 w-11 rounded-xl border transition-all flex items-center justify-center ${
+                showGlobalWorkbench
+                  ? 'border-indigo-400/40 bg-indigo-500/20 text-indigo-200'
+                  : 'border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10'
+              }`}
+              title={showGlobalWorkbench ? '收起全局工作台' : '展开全局工作台'}
+              aria-label={showGlobalWorkbench ? '收起全局工作台' : '展开全局工作台'}
+            >
+              <SlidersHorizontal size={16} />
+            </button>
+          </div>
         </div>
       )}
     </div>

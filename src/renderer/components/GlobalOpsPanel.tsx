@@ -1,38 +1,30 @@
 import React, { useMemo } from 'react';
-import { Database, Download, Loader2, Package } from 'lucide-react';
+import { Download, Loader2, Package, Save } from 'lucide-react';
 import type { Shot } from '@shared/types';
 import TaskPanel from './TaskPanel';
 
 interface GlobalOpsPanelProps {
   shots: Shot[];
-  episodeId: string;
-  setEpisodeId: (id: string) => void;
-  onSaveEpisode: () => Promise<void> | void;
-  onLoadEpisode: () => Promise<void> | void;
   onExportEpisode: () => Promise<void> | void;
-  isSavingEpisode: boolean;
-  isLoadingEpisode: boolean;
   isExporting: boolean;
   createZip: boolean;
   setCreateZip: (next: boolean) => void;
   isElectronRuntime: boolean;
   apiStatus: 'connected' | 'error' | 'idle';
+  isAutoSaving: boolean;
+  lastAutoSavedAt: number | null;
 }
 
 const GlobalOpsPanel: React.FC<GlobalOpsPanelProps> = ({
   shots,
-  episodeId,
-  setEpisodeId,
-  onSaveEpisode,
-  onLoadEpisode,
   onExportEpisode,
-  isSavingEpisode,
-  isLoadingEpisode,
   isExporting,
   createZip,
   setCreateZip,
   isElectronRuntime,
   apiStatus,
+  isAutoSaving,
+  lastAutoSavedAt,
 }) => {
   const renderedShotCount = useMemo(
     () => shots.filter((shot) => Boolean(shot.generatedImageUrl)).length,
@@ -52,6 +44,14 @@ const GlobalOpsPanel: React.FC<GlobalOpsPanelProps> = ({
     idle: { text: '待命中', dot: 'bg-slate-500', textTone: 'text-slate-300' },
   };
 
+  const autoSaveText = !isElectronRuntime
+    ? '浏览器预览模式：仅本地缓存'
+    : isAutoSaving
+      ? '自动保存中...'
+      : lastAutoSavedAt
+        ? `最近保存 ${new Date(lastAutoSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+        : '自动保存已启用';
+
   return (
     <aside className="w-80 bg-[#16191f] border-l border-white/10 flex flex-col shrink-0">
       <div className="h-14 border-b border-white/10 px-4 flex items-center">
@@ -67,7 +67,13 @@ const GlobalOpsPanel: React.FC<GlobalOpsPanelProps> = ({
               <span className={`text-[10px] font-black ${statusMeta[apiStatus].textTone}`}>{statusMeta[apiStatus].text}</span>
             </span>
           </div>
-          <p className="text-[10px] text-slate-500">状态信息已整合到任务区，用于监控生成与导出流程。</p>
+          <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+            <div className="flex items-center gap-2 text-[10px] text-slate-400">
+              <Save size={12} />
+              <span className="font-black tracking-widest">自动保存</span>
+            </div>
+            <p className="mt-1 text-[10px] text-slate-300">{autoSaveText}</p>
+          </div>
         </section>
 
         <section className="bg-slate-500/5 rounded-xl border border-white/10 p-4">
@@ -102,43 +108,6 @@ const GlobalOpsPanel: React.FC<GlobalOpsPanelProps> = ({
           {exportDisabledReason ? (
             <p className="mt-2 text-[10px] text-amber-300">{exportDisabledReason}</p>
           ) : null}
-        </section>
-
-        <section className="bg-slate-500/5 rounded-xl border border-white/10 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Database size={14} className="text-slate-300" />
-            <span className="text-[10px] font-black text-slate-200 tracking-widest">数据库</span>
-          </div>
-          {!isElectronRuntime ? (
-            <p className="mb-3 text-[10px] text-amber-300">当前为浏览器预览模式，数据库功能不可用。</p>
-          ) : null}
-          <div className="mb-3">
-            <label className="text-[9px] font-black uppercase tracking-widest text-slate-500">
-              分集 ID
-            </label>
-            <input
-              value={episodeId}
-              onChange={(e) => setEpisodeId(e.target.value)}
-              className="mt-2 w-full bg-black/40 border border-white/10 rounded-lg py-2 px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40 disabled:opacity-60"
-              disabled={!isElectronRuntime || isSavingEpisode || isLoadingEpisode}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={onLoadEpisode}
-              disabled={!isElectronRuntime || isSavingEpisode || isLoadingEpisode}
-              className="h-9 bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-white/5"
-            >
-              {isLoadingEpisode ? '读取中...' : '读取'}
-            </button>
-            <button
-              onClick={onSaveEpisode}
-              disabled={!isElectronRuntime || isSavingEpisode || isLoadingEpisode}
-              className="h-9 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-indigo-600"
-            >
-              {isSavingEpisode ? '保存中...' : '保存'}
-            </button>
-          </div>
         </section>
 
         <TaskPanel />

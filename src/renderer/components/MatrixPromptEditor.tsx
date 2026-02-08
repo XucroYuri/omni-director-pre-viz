@@ -28,7 +28,6 @@ interface MatrixPromptEditorProps {
   allShots: Shot[];
   config: GlobalConfig;
   episodeId: string;
-  onUpdateConfig: (updates: Partial<GlobalConfig>) => void;
   onUpdatePrompts: (prompts: string[]) => void;
   onUpdateShot: (updates: Partial<Shot>) => void;
   onGenerateImage: () => void;
@@ -90,7 +89,6 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
   shot,
   config,
   episodeId,
-  onUpdateConfig,
   onUpdatePrompts,
   onUpdateShot,
   onGenerateImage,
@@ -555,8 +553,8 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
           <button
             onClick={() => setShowRenderSettings((prev) => !prev)}
             className="h-9 w-9 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg transition-all flex items-center justify-center"
-            title={showRenderSettings ? '收起参数' : '展开参数'}
-            aria-label={showRenderSettings ? '收起参数' : '展开参数'}
+            title={showRenderSettings ? '收起网格布局' : '展开网格布局'}
+            aria-label={showRenderSettings ? '收起网格布局' : '展开网格布局'}
           >
             <Layout size={14} />
           </button>
@@ -697,111 +695,40 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
       )}
 
       {showRenderSettings && (
-        <div className="border-b border-white/10 bg-[#121722] px-4 sm:px-6 py-3 grid grid-cols-1 xl:grid-cols-4 gap-3 shrink-0">
-          <section className="rounded-lg border border-white/10 bg-black/20 p-3 min-h-[132px] flex flex-col">
-            <div className="text-[9px] font-black tracking-widest text-slate-500">画幅比例</div>
-            <div className="mt-2 grid grid-cols-2 gap-2 flex-1">
-              {(['16:9', '9:16'] as const).map((ratio) => {
-                const active = config.aspectRatio === ratio;
-                return (
-                  <button
-                    key={ratio}
-                    onClick={() => onUpdateConfig({ aspectRatio: ratio })}
-                    className={`h-full min-h-[72px] rounded-lg border transition-all flex items-center justify-center gap-2 ${
-                      active
-                        ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
-                        : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/30'
-                    }`}
-                    title={`切换画幅为 ${ratio}`}
-                  >
-                    <span
-                      className={`rounded-sm border ${ratio === '16:9' ? 'w-7 h-4' : 'w-4 h-7'} ${
-                        active ? 'border-indigo-200' : 'border-slate-500'
-                      }`}
-                    />
-                    <span className="text-[11px] font-black tracking-widest">{ratio}</span>
-                  </button>
-                );
-              })}
+        <div className="border-b border-white/10 bg-[#121722] px-4 sm:px-6 py-3 shrink-0">
+          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3 flex flex-wrap items-center gap-3">
+            <span className="text-[10px] font-black tracking-widest text-slate-400">网格布局</span>
+            <div className="flex items-center gap-2 ml-auto">
+              <span className="text-[10px] text-slate-500">行</span>
+              <select
+                value={gridLayout.rows}
+                onChange={(event) => handleGridLayoutChange('rows', Number(event.target.value))}
+                className="h-8 rounded-md border border-white/10 bg-black/40 px-2 text-[10px] font-black text-slate-200 outline-none focus:border-indigo-500/40"
+              >
+                {GRID_VALUES.map((value) => (
+                  <option key={`row-${value}`} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[10px] font-black text-slate-500">x</span>
+              <span className="text-[10px] text-slate-500">列</span>
+              <select
+                value={gridLayout.cols}
+                onChange={(event) => handleGridLayoutChange('cols', Number(event.target.value))}
+                className="h-8 rounded-md border border-white/10 bg-black/40 px-2 text-[10px] font-black text-slate-200 outline-none focus:border-indigo-500/40"
+              >
+                {GRID_VALUES.map((value) => (
+                  <option key={`col-${value}`} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
             </div>
-          </section>
-
-          <section className="rounded-lg border border-white/10 bg-black/20 p-3 min-h-[132px] flex flex-col">
-            <div className="text-[9px] font-black tracking-widest text-slate-500">输出分辨率</div>
-            <div className="mt-2 grid grid-cols-3 gap-2 flex-1">
-              {(['1K', '2K', '4K'] as const).map((resolution) => {
-                const active = config.resolution === resolution;
-                return (
-                  <button
-                    key={resolution}
-                    onClick={() => onUpdateConfig({ resolution })}
-                    className={`h-full min-h-[72px] rounded-lg border transition-all text-[11px] font-black tracking-widest ${
-                      active
-                        ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
-                        : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/30'
-                    }`}
-                    title={`切换分辨率为 ${resolution}`}
-                  >
-                    {resolution}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-white/10 bg-black/20 p-3 min-h-[132px] flex flex-col">
-            <div className="text-[9px] font-black tracking-widest text-slate-500">网格布局</div>
-            <div className="mt-2 space-y-2">
-              <div className="text-[10px] text-slate-400">行数</div>
-              <div className="grid grid-cols-5 gap-1.5">
-                {GRID_VALUES.map((value) => {
-                  const active = gridLayout.rows === value;
-                  return (
-                    <button
-                      key={`row-${value}`}
-                      onClick={() => handleGridLayoutChange('rows', value)}
-                      className={`h-8 rounded-md border text-[10px] font-black ${
-                        active
-                          ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
-                          : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/30'
-                      }`}
-                    >
-                      {value}
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="text-[10px] text-slate-400">列数</div>
-              <div className="grid grid-cols-5 gap-1.5">
-                {GRID_VALUES.map((value) => {
-                  const active = gridLayout.cols === value;
-                  return (
-                    <button
-                      key={`col-${value}`}
-                      onClick={() => handleGridLayoutChange('cols', value)}
-                      className={`h-8 rounded-md border text-[10px] font-black ${
-                        active
-                          ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
-                          : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/30'
-                      }`}
-                    >
-                      {value}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="mt-auto text-[10px] text-slate-500">当前 {gridLayout.rows}x{gridLayout.cols} / 共 {cellCount} 格</div>
-          </section>
-
-          <label className="rounded-lg border border-white/10 bg-black/20 p-3 min-h-[132px] flex flex-col">
-            <span className="text-[9px] font-black tracking-widest text-slate-500">美术风格（全局）</span>
-            <textarea
-              className="mt-2 w-full flex-1 min-h-[72px] bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-[11px] text-slate-200 outline-none resize-none focus:border-indigo-500/40"
-              value={config.artStyle}
-              onChange={(event) => onUpdateConfig({ artStyle: event.target.value })}
-            />
-          </label>
+            <span className="text-[10px] text-slate-500">
+              当前 {gridLayout.rows}x{gridLayout.cols} / 共 {cellCount} 格
+            </span>
+          </div>
         </div>
       )}
 
