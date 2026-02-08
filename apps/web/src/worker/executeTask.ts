@@ -1,7 +1,16 @@
 import type { TaskRecord } from '../lib/models';
-import { episodeExists, getEpisodeSummary } from '../lib/repos/episodes';
-import { getShotById, updateShotStatus, type ShotStatusValue } from '../lib/repos/shots';
+import { episodeExists, getEpisodeById, getEpisodeSummary } from '../lib/repos/episodes';
+import {
+  countShotsByEpisode,
+  createShot,
+  getShotById,
+  updateShotMatrixArtifacts,
+  updateShotStatus,
+  type ShotStatusValue,
+} from '../lib/repos/shots';
+import { createTask } from '../lib/repos/tasks';
 import { TaskWorkerError } from '../lib/taskErrors';
+import { createS3MediaStore, type MediaStore } from '../lib/media';
 
 type TaskPayload = Record<string, unknown>;
 
@@ -37,6 +46,83 @@ function parsePayload(task: TaskRecord): TaskPayload {
   fail('TASK_PAYLOAD_INVALID', 'payload_json must be an object', { taskId: task.id, jobKind: task.job_kind });
 }
 
+function parseOptionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function splitScriptToShots(script: string): Array<{ originalText: string; visualTranslation: string }> {
+  const lines = script
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const limited = lines.slice(0, 500);
+  return limited.map((line) => ({ originalText: line, visualTranslation: '' }));
+}
+
+function buildMatrixPrompts(shot: { original_text: string; visual_translation: string }): string[] {
+  const base = (shot.visual_translation || shot.original_text || '').trim() || 'Shot';
+  const prompts: string[] = [];
+  for (let i = 1; i <= 9; i += 1) {
+    prompts.push(`(${i}/9) ${base}`);
+  }
+  return prompts;
+}
+
+async function renderMatrixPng(input: { title: string; prompts: string[] }): Promise<Buffer> {
+  // Lazy import to keep worker startup light.
+  const { default: sharp } = await import('sharp');
+
+  const cell = 512;
+  const cols = 3;
+  const rows = 3;
+  const width = cell * cols;
+  const height = cell * rows;
+  const palette = ['#0f172a', '#1f2937', '#334155', '#0b3b5a', '#0f4c5c', '#0a4a3f', '#1b4332', '#4a3f1a', '#5a1a0f'];
+  const title = input.title.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const blocks = input.prompts
+    .slice(0, 9)
+    .map((prompt, i) => {
+      const x = (i % cols) * cell;
+      const y = Math.floor(i / cols) * cell;
+      const bg = palette[i % palette.length];
+      const text = String(prompt || '')
+        .slice(0, 140)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      return `
+        <g>
+          <rect x="${x}" y="${y}" width="${cell}" height="${cell}" fill="${bg}" />
+          <rect x="${x + 12}" y="${y + 12}" width="${cell - 24}" height="${cell - 24}" fill="rgba(255,255,255,0.06)" />
+          <text x="${x + 28}" y="${y + 64}" fill="rgba(255,255,255,0.9)" font-size="26" font-family="ui-monospace, Menlo, Monaco, monospace">
+            <tspan>${text}</tspan>
+          </text>
+        </g>
+      `;
+    })
+    .join('\n');
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+      <rect width="100%" height="100%" fill="#0b1220" />
+      ${blocks}
+      <g>
+        <rect x="0" y="0" width="${width}" height="${height}" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="6" />
+        <line x1="${cell}" y1="0" x2="${cell}" y2="${height}" stroke="rgba(255,255,255,0.18)" stroke-width="4" />
+        <line x1="${cell * 2}" y1="0" x2="${cell * 2}" y2="${height}" stroke="rgba(255,255,255,0.18)" stroke-width="4" />
+        <line x1="0" y1="${cell}" x2="${width}" y2="${cell}" stroke="rgba(255,255,255,0.18)" stroke-width="4" />
+        <line x1="0" y1="${cell * 2}" x2="${width}" y2="${cell * 2}" stroke="rgba(255,255,255,0.18)" stroke-width="4" />
+        <text x="32" y="40" fill="rgba(255,255,255,0.75)" font-size="18" font-family="ui-monospace, Menlo, Monaco, monospace">${title}</text>
+      </g>
+    </svg>
+  `.trim();
+
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
 export async function executeTask(task: TaskRecord): Promise<Record<string, unknown>> {
   const payload = parsePayload(task);
 
@@ -57,6 +143,55 @@ export async function executeTask(task: TaskRecord): Promise<Record<string, unkn
       const summary = await getEpisodeSummary(episodeId);
       return {
         episode: summary,
+      };
+    }
+
+    case 'EPISODE_BREAKDOWN_SCRIPT': {
+      const episodeId = parseOptionalString(payload.episodeId) || task.episode_id;
+      assert(hasNonEmptyString(episodeId), 'TASK_PAYLOAD_MISSING', 'episodeId is required', { taskId: task.id });
+      const episode = await getEpisodeById(episodeId);
+      assert(episode, 'TASK_ENTITY_NOT_FOUND', `Episode not found: ${episodeId}`, { taskId: task.id, episodeId });
+      assert(hasNonEmptyString(episode.script), 'TASK_PRECONDITION_FAILED', 'episode.script must be set before breakdown', {
+        taskId: task.id,
+        episodeId,
+      });
+      const existing = await countShotsByEpisode(episodeId);
+      assert(existing === 0, 'TASK_PRECONDITION_FAILED', 'episode already has shots; refusing to breakdown again', {
+        taskId: task.id,
+        episodeId,
+        existing,
+      });
+
+      const shotInputs = splitScriptToShots(episode.script);
+      assert(shotInputs.length > 0, 'TASK_PRECONDITION_FAILED', 'no shots found in script', { taskId: task.id, episodeId });
+
+      const createdShotIds: string[] = [];
+      const createdTaskIds: string[] = [];
+      for (let i = 0; i < shotInputs.length; i += 1) {
+        const input = shotInputs[i];
+        const created = await createShot({
+          episodeId,
+          orderIndex: i + 1,
+          originalText: input.originalText,
+          visualTranslation: input.visualTranslation,
+        });
+        createdShotIds.push(created.id);
+        const matrixTask = await createTask({
+          episodeId,
+          shotId: created.id,
+          type: 'IMAGE',
+          jobKind: 'SHOT_MATRIX_RENDER',
+          payload: {},
+          idempotencyKey: created.id,
+        });
+        createdTaskIds.push(matrixTask.id);
+      }
+
+      return {
+        episodeId,
+        shotCount: createdShotIds.length,
+        shotIds: createdShotIds,
+        matrixTaskIds: createdTaskIds,
       };
     }
 
@@ -81,6 +216,72 @@ export async function executeTask(task: TaskRecord): Promise<Record<string, unkn
       return {
         shotId: updated.id,
         status: updated.status,
+      };
+    }
+
+    case 'SHOT_MATRIX_RENDER': {
+      const shotId = parseOptionalString(payload.shotId) || task.shot_id;
+      assert(hasNonEmptyString(shotId), 'TASK_PAYLOAD_MISSING', 'shotId is required', { taskId: task.id });
+      const shot = await getShotById(shotId);
+      assert(shot, 'TASK_ENTITY_NOT_FOUND', `Shot not found: ${shotId}`, { taskId: task.id, shotId });
+      await updateShotStatus(shotId, 'processing');
+
+      const prompts = buildMatrixPrompts(shot);
+      let png: Buffer;
+      try {
+        png = await renderMatrixPng({
+          title: `episode=${shot.episode_id} shot=${shotId}`,
+          prompts,
+        });
+      } catch (error) {
+        fail(
+          'TASK_PRECONDITION_FAILED',
+          `Matrix rendering requires sharp to be installed: ${error instanceof Error ? error.message : String(error)}`,
+          { taskId: task.id, shotId },
+        );
+      }
+
+      let store: MediaStore;
+      try {
+        store = createS3MediaStore();
+      } catch (error) {
+        fail(
+          'TASK_PRECONDITION_FAILED',
+          `Media store misconfigured: ${error instanceof Error ? error.message : String(error)}`,
+          { taskId: task.id, shotId },
+        );
+      }
+      const motherKey = `episodes/${shot.episode_id}/shots/${shotId}/matrix/mother.png`;
+      await store.put({ key: motherKey, bytes: png, contentType: 'image/png' });
+
+      const { default: sharp } = await import('sharp');
+      const splitKeys: string[] = [];
+      const cell = 512;
+      for (let i = 0; i < 9; i += 1) {
+        const col = i % 3;
+        const row = Math.floor(i / 3);
+        const crop = await sharp(png)
+          .extract({ left: col * cell, top: row * cell, width: cell, height: cell })
+          .png()
+          .toBuffer();
+        const key = `episodes/${shot.episode_id}/shots/${shotId}/matrix/split/${i + 1}.png`;
+        await store.put({ key, bytes: crop, contentType: 'image/png' });
+        splitKeys.push(key);
+      }
+
+      const updated = await updateShotMatrixArtifacts({
+        shotId,
+        status: 'completed',
+        matrixPrompts: prompts,
+        matrixImageKey: motherKey,
+        splitImageKeys: splitKeys,
+      });
+      assert(updated, 'TASK_EXECUTION_FAILED', 'Failed to update shot matrix artifacts', { taskId: task.id, shotId });
+
+      return {
+        shotId,
+        matrixImageKey: motherKey,
+        splitImageKeys: splitKeys,
       };
     }
 
