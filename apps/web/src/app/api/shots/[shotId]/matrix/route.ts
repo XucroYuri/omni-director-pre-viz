@@ -33,7 +33,7 @@ export async function POST(request: NextRequest, context: ShotIdContext) {
       type: 'IMAGE',
       jobKind: 'SHOT_MATRIX_RENDER',
       payload: {},
-      idempotencyKey: parsed.data.idempotencyKey ?? null,
+      idempotencyKey: parsed.data.idempotencyKey ?? shotId,
     });
     return NextResponse.json({ task }, { status: 201 });
   });

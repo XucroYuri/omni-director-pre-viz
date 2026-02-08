@@ -34,7 +34,7 @@ export async function POST(request: NextRequest, context: EpisodeIdContext) {
       type: 'LLM',
       jobKind: 'EPISODE_BREAKDOWN_SCRIPT',
       payload: {},
-      idempotencyKey: parsed.data.idempotencyKey ?? null,
+      idempotencyKey: parsed.data.idempotencyKey ?? episodeId,
     });
     return NextResponse.json({ task }, { status: 201 });
   });
