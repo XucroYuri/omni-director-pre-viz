@@ -30,6 +30,16 @@ async function expectOk<T>(response: Response, label: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function triggerBrowserDownload(bytes: ArrayBuffer, fileName: string, mimeType: string): void {
+  const blob = new Blob([bytes], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function EpisodeDetailClient({ episodeId }: { episodeId: string }) {
   const [episode, setEpisode] = useState<Episode | null>(null);
   const [shots, setShots] = useState<Shot[]>([]);
@@ -63,6 +73,8 @@ export default function EpisodeDetailClient({ episodeId }: { episodeId: string }
           method: 'PATCH',
           headers: {
             'content-type': 'application/json',
+            'x-dev-user': 'episodes-ui',
+            'x-dev-role': 'editor',
           },
           body: JSON.stringify({ script: scriptDraft }),
         }),
@@ -85,6 +97,8 @@ export default function EpisodeDetailClient({ episodeId }: { episodeId: string }
           method: 'POST',
           headers: {
             'content-type': 'application/json',
+            'x-dev-user': 'episodes-ui',
+            'x-dev-role': 'editor',
           },
           body: JSON.stringify({}),
         }),
@@ -107,6 +121,8 @@ export default function EpisodeDetailClient({ episodeId }: { episodeId: string }
           method: 'POST',
           headers: {
             'content-type': 'application/json',
+            'x-dev-user': 'episodes-ui',
+            'x-dev-role': 'editor',
           },
           body: JSON.stringify({}),
         }),
@@ -121,6 +137,29 @@ export default function EpisodeDetailClient({ episodeId }: { episodeId: string }
   };
 
   const exportZipUrl = useMemo(() => `/api/episodes/${episodeId}/export`, [episodeId]);
+
+  const downloadExport = async () => {
+    setError(null);
+    setPending(true);
+    try {
+      const res = await fetch(exportZipUrl, {
+        headers: {
+          'x-dev-user': 'episodes-ui',
+          'x-dev-role': 'viewer',
+        },
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`export failed (${res.status}): ${text}`);
+      }
+      const bytes = await res.arrayBuffer();
+      triggerBrowserDownload(bytes, `episode-${episodeId}.zip`, 'application/zip');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(false);
+    }
+  };
 
   return (
     <main className="min-h-screen p-6 sm:p-10">
@@ -144,12 +183,13 @@ export default function EpisodeDetailClient({ episodeId }: { episodeId: string }
             >
               Queue Ops
             </Link>
-            <a
-              href={exportZipUrl}
-              className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50"
+            <button
+              disabled={pending}
+              onClick={() => void downloadExport()}
+              className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-50"
             >
               Export Zip
-            </a>
+            </button>
           </div>
         </header>
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { readJsonBody, runApi } from '@/lib/api';
+import { requireRole } from '@/lib/auth';
 import { jsonError } from '@/lib/errors';
 import { episodeExists } from '@/lib/repos/episodes';
 import { createTask } from '@/lib/repos/tasks';
@@ -17,6 +18,8 @@ const breakdownInput = z.object({
 export async function POST(request: NextRequest, context: EpisodeIdContext) {
   return runApi(async () => {
     await ensurePhase91Schema();
+    const authError = requireRole(request, 'editor');
+    if (authError) return authError;
     const parsed = breakdownInput.safeParse(await readJsonBody(request));
     if (!parsed.success) {
       return jsonError(400, 'INVALID_INPUT', parsed.error.issues[0]?.message || 'Invalid request body');

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PassThrough } from 'node:stream';
 import archiver from 'archiver';
 import { runApi } from '@/lib/api';
+import { requireRole } from '@/lib/auth';
 import { jsonError } from '@/lib/errors';
 import { createS3MediaStore } from '@/lib/media';
 import { getEpisodeById } from '@/lib/repos/episodes';
@@ -16,6 +17,8 @@ type EpisodeIdContext = {
 export async function GET(request: NextRequest, context: EpisodeIdContext) {
   return runApi(async () => {
     await ensurePhase91Schema();
+    const authError = requireRole(request, 'viewer');
+    if (authError) return authError;
     const { episodeId } = await context.params;
     const episode = await getEpisodeById(episodeId);
     if (!episode) {

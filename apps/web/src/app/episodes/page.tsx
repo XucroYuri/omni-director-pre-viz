@@ -45,6 +45,8 @@ export default function EpisodesPage() {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
+          'x-dev-user': 'episodes-ui',
+          'x-dev-role': 'editor',
         },
         body: JSON.stringify({ title: title.trim() }),
       }), 'create episode');
