@@ -155,6 +155,7 @@ const App: React.FC = () => {
   const [isAutoLinking, setIsAutoLinking] = useState(false);
   const [apiStatus, setApiStatus] = useState<ApiStatus>('idle');
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [notices, setNotices] = useState<UiNotice[]>([]);
 
@@ -626,6 +627,7 @@ const App: React.FC = () => {
 
       if (event.key === 'Escape') {
         setShowShortcuts(false);
+        setShowSettings(false);
       }
 
       if (!isPrimary || isTyping) return;
@@ -715,7 +717,10 @@ const App: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setShowShortcuts((prev) => !prev)}
+              onClick={() => {
+                setShowSettings(false);
+                setShowShortcuts((prev) => !prev);
+              }}
               className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[9px] font-black uppercase tracking-widest flex items-center gap-2"
               title="快捷键与工作流提示"
             >
@@ -724,7 +729,10 @@ const App: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setShowShortcuts((prev) => !prev)}
+              onClick={() => {
+                setShowShortcuts(false);
+                setShowSettings((prev) => !prev);
+              }}
               className="p-2 text-slate-500 hover:text-white"
               title="帮助与设置"
             >
@@ -941,6 +949,48 @@ const App: React.FC = () => {
                   <li>3. 渲染母图后再做子机位视频生成，效率更高。</li>
                   <li>4. 每轮关键改动后保存 Episode，避免会话丢失。</li>
                 </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSettings && (
+        <div className="fixed inset-0 z-[315] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="w-full max-w-xl rounded-xl border border-white/10 bg-[#151922] shadow-2xl overflow-hidden">
+            <div className="h-12 px-5 border-b border-white/10 flex items-center justify-between">
+              <div className="text-[11px] font-black uppercase tracking-widest text-white">设置</div>
+              <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4 text-[11px] text-slate-300">
+              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">运行模式</div>
+                <p className={isElectronRuntime ? 'text-emerald-300' : 'text-amber-300'}>
+                  {isElectronRuntime ? 'Electron 桌面端' : '浏览器预览模式'}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => {
+                    setShowSettings(false);
+                    setShowOnboarding(true);
+                  }}
+                  className="h-9 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 text-[10px] font-black uppercase tracking-widest"
+                >
+                  打开首日引导
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSettings(false);
+                    setShowShortcuts(true);
+                  }}
+                  className="h-9 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 text-[10px] font-black uppercase tracking-widest"
+                >
+                  打开快捷键说明
+                </button>
               </div>
             </div>
           </div>
