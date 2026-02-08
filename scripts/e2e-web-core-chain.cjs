@@ -1,11 +1,55 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const net = require('node:net');
 
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const baseUrl = process.env.WEB_BASE_URL || 'http://127.0.0.1:3100';
 const managedChildren = new Set();
 let cleanedUp = false;
+
+function mergeEnv(extra) {
+  return {
+    ...process.env,
+    ...(extra || {}),
+  };
+}
+
+function parsePortFromBaseUrl(baseUrl) {
+  const url = new URL(baseUrl);
+  if (!url.port) return null;
+  const port = Number(url.port);
+  if (!Number.isFinite(port) || port <= 0) return null;
+  return port;
+}
+
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : null;
+      server.close((err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        if (!port) {
+          reject(new Error('Failed to acquire a free port'));
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
+}
+
+async function resolveManagedBaseUrl() {
+  const provided = (process.env.WEB_BASE_URL || '').trim();
+  if (provided) return provided;
+  const port = await getFreePort();
+  return `http://127.0.0.1:${port}`;
+}
 
 function pipeWithPrefix(stream, prefix, target) {
   if (!stream) return;
@@ -25,7 +69,7 @@ function runCommand(args, options = {}) {
     const child = spawn(npmCmd, args, {
       cwd: process.cwd(),
       stdio: options.stdio || 'inherit',
-      env: process.env,
+      env: options.env ? mergeEnv(options.env) : process.env,
     });
     child.on('error', reject);
     child.on('exit', (code) => {
@@ -38,10 +82,10 @@ function runCommand(args, options = {}) {
   });
 }
 
-function startManagedProcess(name, args) {
+function startManagedProcess(name, args, options = {}) {
   const child = spawn(npmCmd, args, {
     cwd: process.cwd(),
-    env: process.env,
+    env: options.env ? mergeEnv(options.env) : process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
   });
@@ -54,9 +98,23 @@ function startManagedProcess(name, args) {
   return child;
 }
 
-async function waitForHealth(url, timeoutMs = 90000) {
+async function waitForHealth(url, timeoutMs = 90000, options = {}) {
   const startedAt = Date.now();
+  const abortChild = options.abortChild || null;
+  let childExited = false;
+  let childExitCode = null;
+  let childExitSignal = null;
+  if (abortChild) {
+    abortChild.once('exit', (code, signal) => {
+      childExited = true;
+      childExitCode = code;
+      childExitSignal = signal;
+    });
+  }
   while (Date.now() - startedAt < timeoutMs) {
+    if (childExited) {
+      throw new Error(`Web process exited before health was ready (code=${childExitCode}, signal=${childExitSignal || 'null'})`);
+    }
     try {
       const res = await fetch(url);
       if (res.ok) return;
@@ -102,11 +160,18 @@ async function main() {
   try {
     await runCommand(['run', 'phase9:web:db:init']);
 
-    webProc = startManagedProcess('web', ['run', 'phase9:web:dev']);
-    workerProc = startManagedProcess('worker', ['run', 'phase9:web:worker']);
+    const baseUrl = await resolveManagedBaseUrl();
+    const port = parsePortFromBaseUrl(baseUrl);
+    if (!port) {
+      throw new Error(`Invalid WEB_BASE_URL (missing port): ${baseUrl}`);
+    }
+    const env = { WEB_BASE_URL: baseUrl };
 
-    await waitForHealth(`${baseUrl}/api/health`);
-    await runCommand(['--prefix', 'apps/web', 'run', 'e2e:core-chain']);
+    webProc = startManagedProcess('web', ['--prefix', 'apps/web', 'run', 'dev', '--', '--port', String(port)], { env });
+    workerProc = startManagedProcess('worker', ['run', 'phase9:web:worker'], { env });
+
+    await waitForHealth(`${baseUrl}/api/health`, 90000, { abortChild: webProc });
+    await runCommand(['--prefix', 'apps/web', 'run', 'e2e:core-chain'], { env });
   } finally {
     stopManagedProcess(webProc);
     stopManagedProcess(workerProc);
