@@ -3,7 +3,7 @@ import Sidebar from './components/Sidebar';
 import MatrixPromptEditor from './components/MatrixPromptEditor';
 import { DBTask, GlobalConfig, Shot, ScriptBreakdownResponse } from '@shared/types';
 import { DEFAULT_STYLE } from '@shared/constants';
-import { AlertCircle, CheckCircle2, Cpu, Info, Keyboard, Settings, X } from 'lucide-react';
+import { AlertCircle, BookOpenText, CheckCircle2, Cpu, Info, Keyboard, Settings, X } from 'lucide-react';
 import { breakdownScript } from './services/geminiService';
 
 const STORAGE_KEYS = {
@@ -168,17 +168,17 @@ const App: React.FC = () => {
 
   const statusMeta: Record<ApiStatus, { text: string; dot: string; textTone: string }> = {
     connected: {
-      text: 'Services Ready',
+      text: '服务正常',
       dot: 'bg-emerald-500',
       textTone: 'text-emerald-300',
     },
     error: {
-      text: 'Action Required',
+      text: '需要处理',
       dot: 'bg-red-500',
       textTone: 'text-red-300',
     },
     idle: {
-      text: 'Standby',
+      text: '待机',
       dot: 'bg-slate-500',
       textTone: 'text-slate-300',
     },
@@ -417,7 +417,7 @@ const App: React.FC = () => {
     async (sourceScript: string, sourceLabel = '脚本') => {
       const trimmed = sourceScript.trim();
       if (!trimmed) {
-        pushNotice('info', '请先输入剧本文本，再执行 Breakdown。');
+        pushNotice('info', '请先输入剧本文本，再执行脚本拆解。');
         return false;
       }
 
@@ -643,7 +643,7 @@ const App: React.FC = () => {
         {!isElectronRuntime && (
           <div className="h-10 px-6 border-b border-amber-400/20 bg-amber-500/10 flex items-center justify-between">
             <div className="flex items-center gap-2 text-amber-200 text-[10px] font-bold uppercase tracking-widest">
-              <Info size={12} /> Browser Preview Mode
+              <Info size={12} /> 浏览器预览模式
             </div>
             <span className="text-[10px] text-amber-200/80">
               任务队列、数据库和导出功能在 Electron 桌面端生效。
@@ -673,12 +673,21 @@ const App: React.FC = () => {
             </div>
 
             <button
+              onClick={() => setShowOnboarding(true)}
+              className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[9px] font-black uppercase tracking-widest flex items-center gap-2"
+              title="重新打开首日上手引导"
+            >
+              <BookOpenText size={14} />
+              引导
+            </button>
+
+            <button
               onClick={() => setShowShortcuts((prev) => !prev)}
               className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[9px] font-black uppercase tracking-widest flex items-center gap-2"
               title="快捷键与工作流提示"
             >
               <Keyboard size={14} />
-              Tips
+              快捷键
             </button>
 
             <button
@@ -738,7 +747,7 @@ const App: React.FC = () => {
             <div className="h-full flex flex-col items-center justify-center gap-5 text-slate-500 px-8">
               <p className="text-[11px] uppercase tracking-widest">开始创建你的第一组分镜</p>
               <div className="max-w-xl text-center text-[11px] leading-relaxed text-slate-400">
-                在左侧粘贴剧本，点击 <span className="text-indigo-300 font-bold">Breakdown</span> 自动拆解镜头，然后在主区域生成矩阵母图与视频预演。
+                在左侧粘贴剧本，点击 <span className="text-indigo-300 font-bold">拆解脚本</span> 自动拆解镜头，然后在主区域生成矩阵母图与视频预演。
               </div>
               <button
                 onClick={() => {
@@ -861,7 +870,7 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[310] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
           <div className="w-full max-w-2xl rounded-xl border border-white/10 bg-[#151922] shadow-2xl overflow-hidden">
             <div className="h-12 px-5 border-b border-white/10 flex items-center justify-between">
-              <div className="text-[11px] font-black uppercase tracking-widest text-white">Workflow Tips</div>
+              <div className="text-[11px] font-black uppercase tracking-widest text-white">操作提示</div>
               <button onClick={() => setShowShortcuts(false)} className="text-slate-400 hover:text-white">
                 <X size={16} />
               </button>
@@ -870,7 +879,7 @@ const App: React.FC = () => {
               <div>
                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">快捷键</div>
                 <ul className="space-y-1">
-                  <li><span className="text-indigo-300 font-bold">Ctrl/Cmd + Enter</span>：执行脚本 Breakdown</li>
+                  <li><span className="text-indigo-300 font-bold">Ctrl/Cmd + Enter</span>：执行脚本拆解</li>
                   <li><span className="text-indigo-300 font-bold">Ctrl/Cmd + S</span>：保存当前 Episode 到数据库</li>
                   <li><span className="text-indigo-300 font-bold">Esc</span>：关闭当前提示面板</li>
                 </ul>
@@ -879,7 +888,7 @@ const App: React.FC = () => {
                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">建议流程</div>
                 <ul className="space-y-1">
                   <li>1. 先在左侧导入/配置资产并填写 Script。</li>
-                  <li>2. 执行 Breakdown 后逐镜头初始化矩阵 Prompt。</li>
+                  <li>2. 执行脚本拆解后逐镜头初始化矩阵 Prompt。</li>
                   <li>3. 渲染母图后再做子机位视频生成，效率更高。</li>
                   <li>4. 每轮关键改动后保存 Episode，避免会话丢失。</li>
                 </ul>

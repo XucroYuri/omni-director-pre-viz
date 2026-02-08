@@ -534,7 +534,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="border-b border-white/10 flex flex-col bg-[#16191f]/40 shrink-0">
               <div className="p-4 border-b border-white/10 flex items-center justify-between bg-black/30">
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                  <FileText size={14} className="text-indigo-400" /> Script Editor
+                  <FileText size={14} className="text-indigo-400" /> 脚本编辑
                 </span>
                 <button
                   onClick={handleBreakdown}
@@ -542,12 +542,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                   className="text-[10px] font-black text-indigo-400 hover:text-white transition-all uppercase tracking-tight bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20 hover:bg-indigo-500/30 disabled:opacity-40 disabled:hover:text-indigo-400 disabled:hover:bg-indigo-500/10"
                   title={breakdownDisabledReason}
                 >
-                  {isLoading ? 'Processing...' : 'Breakdown'}
+                  {isLoading ? '拆解中...' : '拆解脚本'}
                 </button>
               </div>
               <textarea
                 className="h-32 bg-transparent p-4 text-[12px] leading-relaxed text-slate-200 outline-none resize-none placeholder:text-slate-700 font-medium"
-                value={script} onChange={(e) => setScript(e.target.value)} placeholder="Paste screenplay here to begin AI breakdown..."
+                value={script} onChange={(e) => setScript(e.target.value)} placeholder="在此粘贴剧本文本，开始 AI 拆解..."
               />
 
               <div className="px-4 pb-4 bg-black/20 border-t border-white/10 space-y-2">
@@ -589,13 +589,13 @@ const Sidebar: React.FC<SidebarProps> = ({
               
               <div className="border-t border-white/10 flex flex-col bg-black/40">
                 <div className="p-4 border-b border-white/10 flex items-center justify-between">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Timeline Sequence</span>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">镜头时间线</span>
                 </div>
                 <div className="max-h-64 overflow-y-auto custom-scrollbar p-2 space-y-1.5">
                   {shots.length === 0 ? (
                     <div className="h-24 flex flex-col items-center justify-center text-center p-6 space-y-3">
                       <Terminal size={24} className="text-slate-800 opacity-50" />
-                      <span className="text-[9px] font-bold text-slate-700 uppercase">Wait for analysis</span>
+                      <span className="text-[9px] font-bold text-slate-700 uppercase">等待脚本拆解</span>
                     </div>
                   ) : (
                     shots.map((shot) => {
@@ -644,7 +644,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-indigo-400" />
                     <input 
                       type="text" 
-                      placeholder="Search Assets..." 
+                      placeholder="搜索资产..." 
                       className="w-full bg-black/40 border border-white/10 rounded-lg py-2 pl-9 pr-3 text-[11px] outline-none text-slate-200 focus:border-indigo-500/50 focus:bg-white/5" 
                       value={searchTerm} 
                       onChange={(e) => setSearchTerm(e.target.value)} 
@@ -676,14 +676,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="flex items-center justify-between mb-4 cursor-pointer group" onClick={() => toggle('setup')}>
                   <div className="flex items-center gap-2">
                     <Filter size={14} className="text-slate-300" />
-                    <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">Output Config</span>
+                    <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">输出配置</span>
                   </div>
                   {expanded.setup ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 </div>
                 {expanded.setup && (
                   <div className="grid grid-cols-2 gap-3">
                     <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">
-                      Ratio
+                      比例
                       <select
                         className="mt-2 w-full bg-black/40 border border-white/10 rounded-lg py-2 px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40"
                         value={config.aspectRatio}
@@ -694,7 +694,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       </select>
                     </label>
                     <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">
-                      Resolution
+                      分辨率
                       <select
                         className="mt-2 w-full bg-black/40 border border-white/10 rounded-lg py-2 px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40"
                         value={config.resolution}
@@ -711,7 +711,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="flex items-center justify-between mb-4 cursor-pointer group" onClick={() => toggle('style')}>
                   <div className="flex items-center gap-2">
                     <Palette size={14} className="text-indigo-400" />
-                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Global Art Style</span>
+                    <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">全局美术风格</span>
                   </div>
                   {expanded.style ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 </div>
@@ -748,7 +748,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               <section className="bg-slate-500/5 rounded-xl border border-white/10 p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <Package size={14} className="text-slate-300" />
-                  <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">Delivery</span>
+                  <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">交付导出</span>
                 </div>
                 <div className="mb-2 text-[10px] text-slate-500">
                   可导出镜头：<span className="text-slate-300 font-bold">{renderedShotCount}</span>
@@ -762,7 +762,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     className="w-3 h-3 accent-indigo-500 bg-transparent border-white/20 rounded cursor-pointer"
                   />
                   <label htmlFor="createZip" className="text-[10px] text-slate-400 cursor-pointer select-none">
-                    Create ZIP Package
+                    生成 ZIP 包
                   </label>
                 </div>
                 <button
@@ -772,7 +772,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   title={exportDisabledReason}
                 >
                   {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                  Export Episode
+                  导出分集
                 </button>
                 {exportDisabledReason ? (
                   <p className="mt-2 text-[10px] text-amber-300">{exportDisabledReason}</p>
@@ -804,14 +804,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                     disabled={!isElectronRuntime || isSavingEpisode || isLoadingEpisode}
                     className="h-9 bg-white/5 hover:bg-white/10 text-slate-300 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-white/5"
                   >
-                    {isLoadingEpisode ? 'Loading...' : 'Import'}
+                    {isLoadingEpisode ? '读取中...' : '读取'}
                   </button>
                   <button
                     onClick={onSaveEpisode}
                     disabled={!isElectronRuntime || isSavingEpisode || isLoadingEpisode}
                     className="h-9 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-indigo-600"
                   >
-                    {isSavingEpisode ? 'Saving...' : 'Save'}
+                    {isSavingEpisode ? '保存中...' : '保存'}
                   </button>
                 </div>
               </section>

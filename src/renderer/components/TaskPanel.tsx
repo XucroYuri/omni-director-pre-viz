@@ -3,11 +3,11 @@ import { AlertCircle, CheckCircle2, Clock, Loader2, RefreshCw, StopCircle, XCirc
 import type { DBTask, TaskStatus, TaskType } from '@shared/types';
 
 const statusLabel: Record<TaskStatus, string> = {
-  queued: 'Pending',
-  running: 'Running',
-  completed: 'Success',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
+  queued: '待处理',
+  running: '运行中',
+  completed: '成功',
+  failed: '失败',
+  cancelled: '已取消',
 };
 
 const typeTone: Record<TaskType, string> = {
@@ -88,10 +88,10 @@ const TaskPanel: React.FC = () => {
         const index = prev.findIndex((item) => item.id === task.id);
         const prevStatus = index === -1 ? undefined : prev[index].status;
         if (prevStatus === 'running' && task.status === 'completed') {
-          pushToast(`${task.type} task completed`, 'success');
+          pushToast(`${task.type} 任务已完成`, 'success');
         }
         if (task.status === 'failed' && prevStatus !== 'failed') {
-          pushToast(`${task.type} task failed`, 'error');
+          pushToast(`${task.type} 任务失败`, 'error');
         }
         if (index === -1) return [...prev, task];
         const next = [...prev];
@@ -191,7 +191,7 @@ const TaskPanel: React.FC = () => {
         </div>
       )}
       <div className="flex items-center justify-between mb-3">
-        <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">Task Queue</span>
+        <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest">任务队列</span>
         {taskApiAvailable && (
           <span className="text-[9px] text-slate-500">
             Q:{summary.queued} / R:{summary.running} / F:{summary.failed}
@@ -206,7 +206,7 @@ const TaskPanel: React.FC = () => {
       ) : (
       <div className="max-h-[300px] overflow-y-auto custom-scrollbar space-y-2">
         {tasks.length === 0 ? (
-          <div className="text-[10px] text-slate-500 py-2">No tasks yet.</div>
+          <div className="text-[10px] text-slate-500 py-2">暂无任务。</div>
         ) : (
           orderedTasks.map((task) => {
             const progress =
@@ -242,10 +242,10 @@ const TaskPanel: React.FC = () => {
                         type="button"
                         onClick={() => handleCancel(task)}
                         className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] uppercase text-slate-300 hover:text-white hover:border-white/20 hover:bg-white/10 transition-colors"
-                        title="Cancel task"
+                        title="取消任务"
                       >
                         <StopCircle size={12} className="text-slate-400" />
-                        <span>Cancel</span>
+                        <span>取消</span>
                       </button>
                     )}
                     {canRetry && (
@@ -253,10 +253,10 @@ const TaskPanel: React.FC = () => {
                         type="button"
                         onClick={() => handleRetry(task)}
                         className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] uppercase text-slate-300 hover:text-white hover:border-white/20 hover:bg-white/10 transition-colors"
-                        title="Retry task"
+                        title="重试任务"
                       >
                         <RefreshCw size={12} className="text-slate-400" />
-                        <span>Retry</span>
+                        <span>重试</span>
                       </button>
                     )}
                   </div>
