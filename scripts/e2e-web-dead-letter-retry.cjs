@@ -1,7 +1,13 @@
 const { spawn } = require('node:child_process');
+const fs = require('node:fs/promises');
+const net = require('node:net');
+const path = require('node:path');
 
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const baseUrl = process.env.WEB_BASE_URL || 'http://127.0.0.1:3100';
+const DEFAULT_WEB_PORT = 3300;
+const WEB_STACK_LOCK_PATH = path.join(process.cwd(), '.tmp', 'phase9-web-stack.lock');
+const LOCK_POLL_MS = 1000;
+const LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 const managedChildren = new Set();
 let cleanedUp = false;
 
@@ -21,9 +27,9 @@ function pipeWithPrefix(stream, prefix, target) {
 function runCommand(args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(npmCmd, args, {
-      cwd: process.cwd(),
+      cwd: options.cwd || process.cwd(),
       stdio: options.stdio || 'inherit',
-      env: process.env,
+      env: options.env || process.env,
     });
     child.on('error', reject);
     child.on('exit', (code) => {
@@ -36,10 +42,10 @@ function runCommand(args, options = {}) {
   });
 }
 
-function startManagedProcess(name, args) {
+function startManagedProcess(name, args, options = {}) {
   const child = spawn(npmCmd, args, {
-    cwd: process.cwd(),
-    env: process.env,
+    cwd: options.cwd || process.cwd(),
+    env: options.env || process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
   });
@@ -50,6 +56,56 @@ function startManagedProcess(name, args) {
     managedChildren.delete(child);
   });
   return child;
+}
+
+function parsePortFromBaseUrl(baseUrl) {
+  let parsed;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new Error(`Invalid WEB_BASE_URL: ${baseUrl}`);
+  }
+  const port = parsed.port ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid WEB_BASE_URL port: ${baseUrl}`);
+  }
+  return port;
+}
+
+function canListenOnPort(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.unref();
+    server.on('error', () => resolve(false));
+    server.listen(port, '127.0.0.1', () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+async function findAvailablePort(startPort = DEFAULT_WEB_PORT, endPort = DEFAULT_WEB_PORT + 200) {
+  for (let port = startPort; port <= endPort; port += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await canListenOnPort(port)) {
+      return port;
+    }
+  }
+  throw new Error(`No available port found in range ${startPort}-${endPort}`);
+}
+
+async function resolveWebTarget() {
+  const envBaseUrl = process.env.WEB_BASE_URL?.trim();
+  if (envBaseUrl) {
+    return {
+      baseUrl: envBaseUrl,
+      webPort: parsePortFromBaseUrl(envBaseUrl),
+    };
+  }
+  const webPort = await findAvailablePort();
+  return {
+    baseUrl: `http://127.0.0.1:${webPort}`,
+    webPort,
+  };
 }
 
 async function waitForHealth(url, timeoutMs = 90000) {
@@ -94,21 +150,126 @@ function cleanupChildren() {
   }
 }
 
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
+async function releaseWebStackLock() {
+  try {
+    const raw = await fs.readFile(WEB_STACK_LOCK_PATH, 'utf8');
+    const holder = JSON.parse(raw);
+    if (holder?.pid !== process.pid) {
+      return;
+    }
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+  }
+  try {
+    await fs.unlink(WEB_STACK_LOCK_PATH);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      throw error;
+    }
+  }
+}
+
+async function acquireWebStackLock(owner, timeoutMs = LOCK_TIMEOUT_MS) {
+  await fs.mkdir(path.dirname(WEB_STACK_LOCK_PATH), { recursive: true });
+  const startedAt = Date.now();
+  let lastWaitLogAt = 0;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const handle = await fs.open(WEB_STACK_LOCK_PATH, 'wx');
+      try {
+        await handle.writeFile(
+          JSON.stringify({
+            owner,
+            pid: process.pid,
+            acquiredAt: new Date().toISOString(),
+          }),
+          'utf8',
+        );
+      } finally {
+        await handle.close();
+      }
+      return;
+    } catch (error) {
+      if (error?.code !== 'EEXIST') {
+        throw error;
+      }
+    }
+
+    let holderPid = null;
+    let holderOwner = 'unknown';
+    let hasHolderInfo = false;
+    try {
+      const raw = await fs.readFile(WEB_STACK_LOCK_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Number.isInteger(parsed?.pid) && parsed.pid > 0) {
+        holderPid = parsed.pid;
+        hasHolderInfo = true;
+      }
+      holderOwner = parsed?.owner || holderOwner;
+    } catch {
+      // Lock file may be in-flight or stale; retry after poll interval.
+    }
+
+    if (hasHolderInfo && !isProcessAlive(holderPid)) {
+      await fs.unlink(WEB_STACK_LOCK_PATH).catch(() => {});
+      continue;
+    }
+
+    if (Date.now() - lastWaitLogAt >= 5000) {
+      const holderPidLabel = hasHolderInfo ? String(holderPid) : 'unknown';
+      console.log(`[${owner}] waiting for lock held by pid=${holderPidLabel} owner=${holderOwner}`);
+      lastWaitLogAt = Date.now();
+    }
+    await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_MS));
+  }
+
+  throw new Error(`Timed out waiting for lock: ${WEB_STACK_LOCK_PATH}`);
+}
+
 async function main() {
   let webProc;
   let workerProc;
+  let hasLock = false;
   try {
-    await runCommand(['run', 'phase9:web:db:init']);
+    await acquireWebStackLock('test:e2e:web-dead-letter-retry');
+    hasLock = true;
 
-    webProc = startManagedProcess('web', ['run', 'phase9:web:dev']);
-    workerProc = startManagedProcess('worker', ['run', 'phase9:web:worker']);
+    const { baseUrl, webPort } = await resolveWebTarget();
+    const childEnv = {
+      ...process.env,
+      WEB_BASE_URL: baseUrl,
+      WEB_PORT: String(webPort),
+    };
+    console.log(`[test:e2e:web-dead-letter-retry] WEB_BASE_URL=${baseUrl}`);
+
+    await runCommand(['run', 'phase9:web:db:init'], { env: childEnv });
+
+    webProc = startManagedProcess('web', ['exec', '--', 'next', 'dev', '--port', String(webPort)], {
+      cwd: 'apps/web',
+      env: childEnv,
+    });
+    workerProc = startManagedProcess('worker', ['--prefix', 'apps/web', 'run', 'worker'], { env: childEnv });
 
     await waitForHealth(`${baseUrl}/api/health`);
-    await runCommand(['--prefix', 'apps/web', 'run', 'e2e:dead-letter-retry']);
+    await runCommand(['--prefix', 'apps/web', 'run', 'e2e:dead-letter-retry'], { env: childEnv });
   } finally {
     stopManagedProcess(webProc);
     stopManagedProcess(workerProc);
     cleanupChildren();
+    if (hasLock) {
+      await releaseWebStackLock();
+    }
   }
 }
 
