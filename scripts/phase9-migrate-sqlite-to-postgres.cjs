@@ -2,8 +2,8 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
-const Database = require('better-sqlite3');
 const { Pool } = require('pg');
 
 function readArg(flag) {
@@ -59,6 +59,45 @@ function safeJsonParse(text) {
     return JSON.parse(trimmed);
   } catch {
     return { raw: trimmed };
+  }
+}
+
+function createSqliteClient(dbPath) {
+  try {
+    // Prefer better-sqlite3 when ABI matches.
+    // eslint-disable-next-line global-require
+    const Database = require('better-sqlite3');
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    return {
+      kind: 'better-sqlite3',
+      all(table) {
+        return db.prepare(`SELECT * FROM ${table}`).all();
+      },
+      close() {
+        db.close();
+      },
+    };
+  } catch {
+    // Fallback to sqlite3 CLI (`sqlite3 -json`).
+    const sqlite3 = spawnSync('sqlite3', ['--version'], { encoding: 'utf8' });
+    if (sqlite3.status !== 0) {
+      throw new Error('Neither better-sqlite3 nor sqlite3 CLI is available to read SQLite');
+    }
+    return {
+      kind: 'sqlite3-cli',
+      all(table) {
+        const result = spawnSync('sqlite3', [dbPath, '-json', `SELECT * FROM ${table}`], { encoding: 'utf8' });
+        if (result.status !== 0) {
+          throw new Error(`sqlite3 query failed for table ${table}: ${String(result.stderr || result.stdout || '').trim()}`);
+        }
+        const out = String(result.stdout || '').trim();
+        if (!out) return [];
+        return JSON.parse(out);
+      },
+      close() {
+        // no-op
+      },
+    };
   }
 }
 
@@ -118,7 +157,7 @@ async function ensureSchema(pool) {
 }
 
 async function migrateEpisodes(db, pool, report) {
-  const rows = db.prepare('SELECT * FROM episodes').all();
+  const rows = db.all('episodes');
   report.sqlite.episodes = rows.length;
   let migrated = 0;
   await pool.query('BEGIN');
@@ -164,7 +203,7 @@ async function migrateEpisodes(db, pool, report) {
 }
 
 async function migrateShots(db, pool, report) {
-  const rows = db.prepare('SELECT * FROM shots').all();
+  const rows = db.all('shots');
   report.sqlite.shots = rows.length;
   let migrated = 0;
   await pool.query('BEGIN');
@@ -216,7 +255,7 @@ async function migrateShots(db, pool, report) {
 }
 
 async function migrateAssets(db, pool, report) {
-  const rows = db.prepare('SELECT * FROM assets').all();
+  const rows = db.all('assets');
   report.sqlite.assets = rows.length;
   let migrated = 0;
   await pool.query('BEGIN');
@@ -272,7 +311,7 @@ async function migrateAssets(db, pool, report) {
 }
 
 async function migrateTasks(db, pool, report) {
-  const rows = db.prepare('SELECT * FROM tasks').all();
+  const rows = db.all('tasks');
   report.sqlite.tasks = rows.length;
   let migrated = 0;
   await pool.query('BEGIN');
@@ -435,7 +474,7 @@ async function main() {
     totalsAfter: {},
   };
 
-  const sqlite = new Database(resolvedSqlitePath, { readonly: true, fileMustExist: true });
+  const sqlite = createSqliteClient(resolvedSqlitePath);
   const pool = new Pool({ connectionString: databaseUrl });
   try {
     await ensureSchema(pool);
@@ -465,7 +504,7 @@ async function main() {
   }
 
   fs.writeFileSync(resolvedReportPath, JSON.stringify(report, null, 2));
-  console.log('Migration finished', report);
+  console.log('Migration finished', { ...report, sqliteDriver: sqlite.kind });
 }
 
 main().catch((error) => {
