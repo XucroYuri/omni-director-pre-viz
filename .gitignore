@@ -9,11 +9,15 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-app
 dist-ssr
 *.local
 output
 tmp
 temp_verification_out
+
+# Local agent state
+.sisyphus/
 
 # Editor directories and files
 .vscode/*
