@@ -23,7 +23,7 @@
     "dev:renderer": "vite",
     "dev:electron": "concurrently \"tsc -p tsconfig.electron.json -w\" \"wait-on tcp:3000 dist/main/main.js dist/preload/preload.js && cross-env NODE_ENV=development node scripts/run-electron-dev.cjs\"",
     "build:electron": "tsc -p tsconfig.electron.json",
-    "build": "npm run build:electron && vite build && electron-builder --publish never",
+    "build": "npm run build:electron && vite build && cross-env PYTHON_PATH=python3 electron-builder --publish never",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:electron": "tsc -p tsconfig.electron.json --noEmit",
