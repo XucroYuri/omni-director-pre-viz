@@ -224,6 +224,16 @@ export async function executeTask(task: TaskRecord): Promise<Record<string, unkn
       assert(hasNonEmptyString(shotId), 'TASK_PAYLOAD_MISSING', 'shotId is required', { taskId: task.id });
       const shot = await getShotById(shotId);
       assert(shot, 'TASK_ENTITY_NOT_FOUND', `Shot not found: ${shotId}`, { taskId: task.id, shotId });
+
+      if (shot.matrix_image_key) {
+        return {
+          shotId,
+          skipped: true,
+          reason: 'already_rendered',
+          matrixImageKey: shot.matrix_image_key,
+          splitImageKeys: shot.split_image_keys_json,
+        };
+      }
       await updateShotStatus(shotId, 'processing');
 
       const prompts = buildMatrixPrompts(shot);
