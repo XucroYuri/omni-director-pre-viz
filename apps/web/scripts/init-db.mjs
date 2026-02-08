@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
 const { Pool } = pg;
+const SCHEMA_LOCK_KEY_1 = 1869440617;
+const SCHEMA_LOCK_KEY_2 = 1882272000;
 
 async function loadEnvLocal(baseDir) {
   const envPath = path.join(baseDir, '.env.local');
@@ -45,10 +47,17 @@ async function main() {
     connectionString: getDatabaseUrl(),
   });
 
+  const client = await pool.connect();
   try {
-    await pool.query(schemaSql);
+    await client.query('SELECT pg_advisory_lock($1, $2)', [SCHEMA_LOCK_KEY_1, SCHEMA_LOCK_KEY_2]);
+    try {
+      await client.query(schemaSql);
+    } finally {
+      await client.query('SELECT pg_advisory_unlock($1, $2)', [SCHEMA_LOCK_KEY_1, SCHEMA_LOCK_KEY_2]);
+    }
     console.log('Phase 9.1 schema initialized successfully');
   } finally {
+    client.release();
     await pool.end();
   }
 }

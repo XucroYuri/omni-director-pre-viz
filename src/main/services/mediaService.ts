@@ -2,6 +2,7 @@ import { app } from 'electron';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 type MediaWriteInput = {
   bytes: Uint8Array;
@@ -164,7 +165,13 @@ export function resolveMediaRefToFilePath(value: string): string | null {
     return resolveUrlToPath(value);
   }
   if (value.startsWith('file://')) {
-    return value.replace('file://', '');
+    try {
+      const abs = path.resolve(fileURLToPath(value));
+      assertPathInsideMediaRoot(abs);
+      return abs;
+    } catch {
+      return null;
+    }
   }
   if (value.startsWith('data:')) {
     return null;
