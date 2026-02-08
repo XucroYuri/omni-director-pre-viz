@@ -17,6 +17,7 @@
     "phase9:web:smoke": "node scripts/phase9-web-smoke.cjs",
     "phase9:web:worker": "npm --prefix apps/web run worker",
     "phase9:web:worker:once": "npm --prefix apps/web run worker:once",
+    "phase9:migrate:sqlite": "node scripts/phase9-migrate-sqlite-to-postgres.cjs",
     "test:e2e:web-dead-letter-retry": "node scripts/e2e-web-dead-letter-retry.cjs",
     "test:e2e:web-core-chain": "node scripts/e2e-web-core-chain.cjs",
     "dev": "concurrently \"npm:dev:renderer\" \"npm:dev:electron\"",
@@ -31,6 +32,7 @@
     "archiver": "^7.0.1",
     "better-sqlite3": "^12.5.0",
     "lucide-react": "^0.562.0",
+    "pg": "^8.18.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "sharp": "^0.34.5"
