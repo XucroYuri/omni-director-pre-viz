@@ -14,7 +14,7 @@
     "phase9:web:dev:with-worker": "concurrently \"npm:phase9:web:dev\" \"npm:phase9:web:worker\"",
     "phase9:web:build": "npm --prefix apps/web run build",
     "phase9:web:clean": "npm --prefix apps/web run clean",
-    "phase9:web:smoke": "npm --prefix apps/web run smoke:api",
+    "phase9:web:smoke": "node scripts/phase9-web-smoke.cjs",
     "phase9:web:worker": "npm --prefix apps/web run worker",
     "phase9:web:worker:once": "npm --prefix apps/web run worker:once",
     "test:e2e:web-dead-letter-retry": "node scripts/e2e-web-dead-letter-retry.cjs",
