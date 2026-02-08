@@ -15,6 +15,11 @@ const endpoints = [
   { method: 'POST', path: '/api/tasks/<taskId>/cancel', note: 'Cancel queued/running task' },
   { method: 'POST', path: '/api/tasks/<taskId>/retry', note: 'Retry failed/cancelled task' },
   { method: 'GET', path: '/api/tasks/ops', note: 'Ops snapshot: queue/kind/failed/dead-letter' },
+  { method: 'GET', path: '/api/episodes/<episodeId>', note: 'Episode detail (script/context)' },
+  { method: 'PATCH', path: '/api/episodes/<episodeId>', note: 'Update episode script/context' },
+  { method: 'POST', path: '/api/episodes/<episodeId>/breakdown', note: 'Enqueue script breakdown -> shots + matrix tasks' },
+  { method: 'POST', path: '/api/shots/<shotId>/matrix', note: 'Enqueue 3x3 matrix render for shot' },
+  { method: 'GET', path: '/api/episodes/<episodeId>/export', note: 'Export zip + manifest (includes matrix images if present)' },
 ];
 
 export default function HomePage() {
@@ -32,6 +37,12 @@ export default function HomePage() {
               className="inline-flex items-center rounded-lg border border-indigo-500 bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700"
             >
               Open Queue Ops Console
+            </Link>
+            <Link
+              href="/episodes"
+              className="ml-3 inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-50"
+            >
+              Open Episodes
             </Link>
           </div>
         </header>
