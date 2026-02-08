@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { IPC_CHANNELS } from '../shared/ipc';
+import { IPC_CHANNELS, type DiscoverMissingAssetsResult } from '../shared/ipc';
 import { limiters } from './providers/limiters';
 import {
   breakdownScript,
@@ -11,6 +11,7 @@ import {
   optimizePrompts,
   recommendAssets,
 } from './providers/aihubmix/gemini';
+import { isMissingAihubmixApiKeyError } from './providers/aihubmix/env';
 import { generateShotVideo } from './providers/aihubmix/sora2';
 import { dbService } from './services/dbService';
 import { exportEpisode } from './services/exportService';
@@ -50,6 +51,15 @@ async function hydrateParamsImageUri(params: any) {
 import { taskQueue } from './queue/TaskQueue';
 
 let registered = false;
+let hasWarnedMissingAihubmixApiKeyForDiscovery = false;
+
+function emptyDiscoverMissingAssetsResult(): DiscoverMissingAssetsResult {
+  return {
+    characters: [],
+    scenes: [],
+    props: [],
+  };
+}
 
 export function registerIpcHandlers() {
   if (registered) return;
@@ -111,6 +121,19 @@ export function registerIpcHandlers() {
     }),
   );
   ipcMain.handle(IPC_CHANNELS.ai.discoverMissingAssets, async (_evt, shot, config) =>
-    limiters.llm(() => discoverMissingAssets(shot, config)),
+    limiters.llm(async () => {
+      try {
+        return await discoverMissingAssets(shot, config);
+      } catch (error) {
+        if (!isMissingAihubmixApiKeyError(error)) {
+          throw error;
+        }
+        if (!hasWarnedMissingAihubmixApiKeyForDiscovery) {
+          hasWarnedMissingAihubmixApiKeyForDiscovery = true;
+          console.warn('AIHUBMIX_API_KEY is not configured; discoverMissingAssets returns empty results.');
+        }
+        return emptyDiscoverMissingAssetsResult();
+      }
+    }),
   );
 }

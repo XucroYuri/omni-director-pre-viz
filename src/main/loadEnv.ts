@@ -21,7 +21,7 @@ function parseEnvFile(content: string) {
 
 export function loadLocalEnvFiles() {
   const cwd = process.cwd();
-  const candidates = ['.env.local', '.env'];
+  const candidates = ['.env.local', '.env', path.join('apps', 'web', '.env.local'), path.join('apps', 'web', '.env')];
   for (const name of candidates) {
     const filePath = path.join(cwd, name);
     if (!fs.existsSync(filePath)) continue;
