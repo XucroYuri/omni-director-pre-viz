@@ -1,8 +1,22 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, protocol } from 'electron';
 import * as path from 'node:path';
 import { initDatabase } from './db';
 import { registerIpcHandlers } from './ipc';
 import { loadLocalEnvFiles } from './loadEnv';
+import { registerMediaProtocol } from './services/mediaProtocol';
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'omni-media',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+]);
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -51,6 +65,7 @@ async function createMainWindow() {
 app.whenReady().then(async () => {
   loadLocalEnvFiles();
   initDatabase();
+  registerMediaProtocol();
   await createMainWindow();
 
   app.on('activate', async () => {
