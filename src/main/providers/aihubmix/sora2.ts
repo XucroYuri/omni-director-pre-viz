@@ -3,8 +3,8 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { GlobalConfig, VideoGenerationParams } from '../../../shared/types';
 import { buildAssetInjection, ensurePromptListLength, getAngleLabel, normalizeGridLayout } from '../../../shared/utils';
-import { getAihubmixEnv } from './env';
 import { createAssetCollage } from '../../services/assetCollage';
+import { pickModel, runWithProviderFallback } from '../router';
 
 type SoraVideoStatus = 'queued' | 'in_progress' | 'completed' | 'failed' | string;
 
@@ -106,96 +106,108 @@ export async function generateShotVideo(
   config: GlobalConfig,
   signal?: AbortSignal,
 ): Promise<{ path: string; dataUri: string }> {
-  throwIfAborted(signal);
-  const env = getAihubmixEnv();
-  const size = mapVideoSize(config.aspectRatio);
-
-  let prompt = params.prompt?.trim() || '';
-  let imageUri = params.imageUri;
-
-  if (params.inputMode === 'MATRIX_FRAME') {
-    imageUri = params.imageUri || params.shot.generatedImageUrl;
-    if (!imageUri) throw new Error('Matrix video requires generatedImageUrl');
-    prompt = buildMatrixVideoPrompt(params, config);
-  } else if (params.inputMode === 'IMAGE_FIRST_FRAME') {
-    if (!imageUri) throw new Error('Slot video requires input image');
-    if (!prompt) prompt = params.shot.visualTranslation;
-  } else if (params.inputMode === 'TEXT_ONLY') {
-    if (!prompt) prompt = params.shot.visualTranslation;
-  } else if (params.inputMode === 'ASSET_COLLAGE') {
-    if (!imageUri) {
+  return runWithProviderFallback({
+    capability: 'video',
+    preferredProvider: config.apiProvider,
+    taskName: 'generateShotVideo',
+    operation: async (ctx) => {
       throwIfAborted(signal);
-      const collage = await createAssetCollage(params.shot, config);
-      imageUri = `data:image/png;base64,${collage.toString('base64')}`;
-    }
-    if (!prompt) prompt = params.shot.visualTranslation;
-    const assetInjection = buildAssetInjection(params.shot, config);
-    if (assetInjection) prompt = `${prompt}\n${assetInjection}`;
-  }
+      if (!ctx.openaiBaseUrl) {
+        throw new Error(`Provider ${ctx.providerId} missing OpenAI-compatible base URL for video.`);
+      }
 
-  const duration = params.inputMode === 'MATRIX_FRAME' ? '8s' : '4s';
+      const size = mapVideoSize(config.aspectRatio);
+      let prompt = params.prompt?.trim() || '';
+      let imageUri = params.imageUri;
 
-  const body: any = {
-    model: 'sora-2',
-    prompt: `${VIDEO_PRESET_PREFIX}\n${prompt}`,
-    size,
-    duration,
-  };
+      if (params.inputMode === 'MATRIX_FRAME') {
+        imageUri = params.imageUri || params.shot.generatedImageUrl;
+        if (!imageUri) throw new Error('Matrix video requires generatedImageUrl');
+        prompt = buildMatrixVideoPrompt(params, config);
+      } else if (params.inputMode === 'IMAGE_FIRST_FRAME') {
+        if (!imageUri) throw new Error('Slot video requires input image');
+        if (!prompt) prompt = params.shot.visualTranslation;
+      } else if (params.inputMode === 'TEXT_ONLY') {
+        if (!prompt) prompt = params.shot.visualTranslation;
+      } else if (params.inputMode === 'ASSET_COLLAGE') {
+        if (!imageUri) {
+          throwIfAborted(signal);
+          const collage = await createAssetCollage(params.shot, config);
+          imageUri = `data:image/png;base64,${collage.toString('base64')}`;
+        }
+        if (!prompt) prompt = params.shot.visualTranslation;
+        const assetInjection = buildAssetInjection(params.shot, config);
+        if (assetInjection) prompt = `${prompt}\n${assetInjection}`;
+      }
 
-  if (imageUri) {
-    const { mimeType, base64 } = parseDataUri(imageUri);
-    body.image = { imageBytes: base64, mimeType };
-  }
+      const duration = params.inputMode === 'MATRIX_FRAME' ? '8s' : '4s';
+      const model = pickModel(ctx.models.video, 'sora-2');
+      const body: any = {
+        model,
+        prompt: `${VIDEO_PRESET_PREFIX}\n${prompt}`,
+        size,
+        duration,
+      };
 
-  const headers = {
-    Authorization: `Bearer ${env.apiKey}`,
-    'Content-Type': 'application/json',
-  };
+      if (imageUri) {
+        const { mimeType, base64 } = parseDataUri(imageUri);
+        body.image = { imageBytes: base64, mimeType };
+      }
 
-  const created = await httpJson<CreateVideoResponse>(`${env.openaiBaseUrl}/videos`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    signal,
+      const headers = {
+        Authorization: `Bearer ${ctx.apiKey}`,
+        'Content-Type': 'application/json',
+      };
+
+      const created = await httpJson<CreateVideoResponse>(`${ctx.openaiBaseUrl}/videos`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal,
+      });
+
+      let video: RetrieveVideoResponse = { id: created.id, status: created.status };
+      const startedAt = Date.now();
+      const timeoutMs = 10 * 60 * 1000;
+
+      while (video.status === 'queued' || video.status === 'in_progress') {
+        throwIfAborted(signal);
+        if (Date.now() - startedAt > timeoutMs) throw new Error('Video generation timed out');
+        await sleep(5000, signal);
+        throwIfAborted(signal);
+        video = await httpJson<RetrieveVideoResponse>(`${ctx.openaiBaseUrl}/videos/${video.id}`, {
+          method: 'GET',
+          headers,
+          signal,
+        });
+      }
+
+      if (video.status !== 'completed') {
+        throw new Error(video.error?.message || `Video failed: ${video.status}`);
+      }
+
+      const contentUrls = [
+        `${ctx.openaiBaseUrl}/videos/${video.id}/content`,
+        `${ctx.openaiBaseUrl}/videos/${video.id}/download`,
+      ];
+      let bytes: Uint8Array | null = null;
+      for (const url of contentUrls) {
+        try {
+          throwIfAborted(signal);
+          bytes = await httpBytes(url, { method: 'GET', headers, signal });
+          break;
+        } catch {
+          // try next
+        }
+      }
+      if (!bytes) throw new Error('Video download failed');
+
+      await fs.mkdir(path.join(ctx.outputDir, 'videos'), { recursive: true });
+      const hash = crypto.createHash('sha1').update(bytes).digest('hex').slice(0, 12);
+      const filePath = path.join(ctx.outputDir, 'videos', `${ctx.providerId}_${hash}.mp4`);
+      await fs.writeFile(filePath, bytes);
+
+      return { path: filePath, dataUri: `data:video/mp4;base64,${Buffer.from(bytes).toString('base64')}` };
+    },
   });
-
-  let video: RetrieveVideoResponse = { id: created.id, status: created.status };
-  const startedAt = Date.now();
-  const timeoutMs = 10 * 60 * 1000;
-
-  while (video.status === 'queued' || video.status === 'in_progress') {
-    throwIfAborted(signal);
-    if (Date.now() - startedAt > timeoutMs) throw new Error('Video generation timed out');
-    await sleep(5000, signal);
-    throwIfAborted(signal);
-    video = await httpJson<RetrieveVideoResponse>(`${env.openaiBaseUrl}/videos/${video.id}`, {
-      method: 'GET',
-      headers,
-      signal,
-    });
-  }
-
-  if (video.status !== 'completed') {
-    throw new Error(video.error?.message || `Video failed: ${video.status}`);
-  }
-
-  const contentUrls = [`${env.openaiBaseUrl}/videos/${video.id}/content`, `${env.openaiBaseUrl}/videos/${video.id}/download`];
-  let bytes: Uint8Array | null = null;
-  for (const url of contentUrls) {
-    try {
-      throwIfAborted(signal);
-      bytes = await httpBytes(url, { method: 'GET', headers, signal });
-      break;
-    } catch {
-      // try next
-    }
-  }
-  if (!bytes) throw new Error('Video download failed');
-
-  await fs.mkdir(path.join(env.outputDir, 'videos'), { recursive: true });
-  const hash = crypto.createHash('sha1').update(bytes).digest('hex').slice(0, 12);
-  const filePath = path.join(env.outputDir, 'videos', `sora2_${hash}.mp4`);
-  await fs.writeFile(filePath, bytes);
-
-  return { path: filePath, dataUri: `data:video/mp4;base64,${Buffer.from(bytes).toString('base64')}` };
 }

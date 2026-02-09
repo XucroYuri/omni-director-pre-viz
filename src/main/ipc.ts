@@ -11,11 +11,12 @@ import {
   optimizePrompts,
   recommendAssets,
 } from './providers/aihubmix/gemini';
-import { isMissingAihubmixApiKeyError } from './providers/aihubmix/env';
+import { isMissingApiCredentialError } from './providers/router';
 import { generateShotVideo } from './providers/aihubmix/sora2';
 import { dbService } from './services/dbService';
 import { exportEpisode } from './services/exportService';
 import { readFileAsDataUri, resolveMediaRefToFilePath, writeBytesToMedia, urlFromPath } from './services/mediaService';
+import { getRuntimeEnvConfig, saveRuntimeEnvConfig } from './services/runtimeEnvService';
 
 async function hydrateConfigRefImages(config: any) {
   if (!config) return config;
@@ -51,7 +52,7 @@ async function hydrateParamsImageUri(params: any) {
 import { taskQueue } from './queue/TaskQueue';
 
 let registered = false;
-let hasWarnedMissingAihubmixApiKeyForDiscovery = false;
+let hasWarnedMissingApiCredentialForDiscovery = false;
 
 function emptyDiscoverMissingAssetsResult(): DiscoverMissingAssetsResult {
   return {
@@ -90,6 +91,8 @@ export function registerIpcHandlers() {
   });
   ipcMain.handle(IPC_CHANNELS.app.db.saveEpisode, async (_evt, data) => dbService.saveEpisodeFull(data));
   ipcMain.handle(IPC_CHANNELS.app.db.loadEpisode, async (_evt, episodeId) => dbService.loadEpisode(episodeId));
+  ipcMain.handle(IPC_CHANNELS.app.settings.getRuntimeEnv, async () => getRuntimeEnvConfig());
+  ipcMain.handle(IPC_CHANNELS.app.settings.saveRuntimeEnv, async (_evt, input) => saveRuntimeEnvConfig(input));
   ipcMain.handle(IPC_CHANNELS.app.task.submit, async (_evt, task) => taskQueue.enqueue(task));
   ipcMain.handle(IPC_CHANNELS.app.task.list, async () => taskQueue.list());
   ipcMain.handle(IPC_CHANNELS.app.task.cancel, async (_evt, taskId) => taskQueue.cancelTask(taskId));
@@ -130,12 +133,12 @@ export function registerIpcHandlers() {
       try {
         return await discoverMissingAssets(shot, config);
       } catch (error) {
-        if (!isMissingAihubmixApiKeyError(error)) {
+        if (!isMissingApiCredentialError(error)) {
           throw error;
         }
-        if (!hasWarnedMissingAihubmixApiKeyForDiscovery) {
-          hasWarnedMissingAihubmixApiKeyForDiscovery = true;
-          console.warn('AIHUBMIX_API_KEY is not configured; discoverMissingAssets returns empty results.');
+        if (!hasWarnedMissingApiCredentialForDiscovery) {
+          hasWarnedMissingApiCredentialForDiscovery = true;
+          console.warn('No provider API key is configured; discoverMissingAssets returns empty results.');
         }
         return emptyDiscoverMissingAssetsResult();
       }

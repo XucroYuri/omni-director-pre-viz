@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="136" y1="120" x2="888" y2="904" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1F293B" />
+      <stop offset="1" stop-color="#060C18" />
+    </linearGradient>
+    <linearGradient id="steel" x1="248" y1="232" x2="776" y2="792" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E8ECF8" />
+      <stop offset="1" stop-color="#A2AFCC" />
+    </linearGradient>
+    <linearGradient id="bladeA" x1="392" y1="392" x2="640" y2="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DCE4FA" />
+      <stop offset="1" stop-color="#AAB7D8" />
+    </linearGradient>
+    <linearGradient id="bladeB" x1="640" y1="392" x2="392" y2="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#BBC8E8" />
+      <stop offset="1" stop-color="#8F9FCA" />
+    </linearGradient>
+  </defs>
+
+  <rect x="72" y="72" width="880" height="880" rx="220" fill="url(#bg)" />
+  <rect x="72" y="72" width="880" height="880" rx="220" fill="none" stroke="#2D3B56" stroke-width="18" />
+
+  <rect x="228" y="228" width="568" height="568" rx="140" fill="none" stroke="url(#steel)" stroke-width="48" />
+  <circle cx="512" cy="512" r="206" fill="none" stroke="#7C8EB8" stroke-width="18" />
+  <circle cx="512" cy="512" r="156" fill="#0A1222" stroke="#6E80AB" stroke-width="14" />
+
+  <path d="M512 512L512 374L632 443Z" fill="url(#bladeA)" />
+  <path d="M512 512L632 443L632 581Z" fill="url(#bladeB)" />
+  <path d="M512 512L632 581L512 650Z" fill="url(#bladeA)" />
+  <path d="M512 512L512 650L392 581Z" fill="url(#bladeB)" />
+  <path d="M512 512L392 581L392 443Z" fill="url(#bladeA)" />
+  <path d="M512 512L392 443L512 374Z" fill="url(#bladeB)" />
+
+  <path d="M252 358V276H334" fill="none" stroke="#8EA1D1" stroke-linecap="round" stroke-width="24" />
+  <path d="M690 276H772V358" fill="none" stroke="#8EA1D1" stroke-linecap="round" stroke-width="24" />
+  <path d="M772 666V748H690" fill="none" stroke="#8EA1D1" stroke-linecap="round" stroke-width="24" />
+  <path d="M334 748H252V666" fill="none" stroke="#8EA1D1" stroke-linecap="round" stroke-width="24" />
+</svg>

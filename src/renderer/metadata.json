@@ -1,5 +1,5 @@
 {
-  "name": "Omni-Director Pre-viz Workstation (全覆盖·智能影视预演工作站)",
+  "name": "HC Timeline V1.0 (全覆盖·智能影视预演工作站)",
   "description": "一个面向动画从业者的智能预演工具，支持剧本时序拆解、九机位矩阵生成及视觉一致性资产管理。",
   "requestFramePermissions": [
     "camera"

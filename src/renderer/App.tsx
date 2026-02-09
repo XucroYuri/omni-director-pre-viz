@@ -1,18 +1,29 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Sidebar from './components/Sidebar';
-import MatrixPromptEditor from './components/MatrixPromptEditor';
+import StoryboardEditor from './components/StoryboardEditor';
 import GlobalOpsPanel from './components/GlobalOpsPanel';
 import ProjectManager from './components/ProjectManager';
-import { DBTask, EpisodeSummary, GlobalConfig, ProjectSummary, Shot, ScriptBreakdownResponse } from '@shared/types';
+import {
+  AICapability,
+  DBTask,
+  EpisodeSummary,
+  GlobalConfig,
+  ProjectSummary,
+  ProviderId,
+  RuntimeEnvConfig,
+  Shot,
+  ScriptBreakdownResponse,
+} from '@shared/types';
 import {
   ensurePromptListLength,
   getGridCellCount,
   normalizeGridLayout,
   normalizeIndexedList,
 } from '@shared/utils';
-import { DEFAULT_STYLE } from '@shared/constants';
-import { AlertCircle, BookOpenText, CheckCircle2, Cpu, FolderKanban, Info, Keyboard, Loader2, Moon, PanelLeft, PanelRight, Settings, Sun, X } from 'lucide-react';
-import { breakdownScript } from './services/geminiService';
+import { DEFAULT_RUNTIME_ENV_CONFIG, DEFAULT_STYLE } from '@shared/constants';
+import { AlertCircle, CheckCircle2, FolderKanban, Info, Loader2, Moon, Settings, Sun, X } from 'lucide-react';
+import { breakdownScript, optimizePrompts, recommendAssets } from './services/geminiService';
+import brandMark from './assets/brand-mark.svg';
 
 const STORAGE_KEYS = {
   CONFIG: 'OMNI_DIRECTOR_CONFIG',
@@ -32,19 +43,36 @@ type NoticeTone = 'success' | 'error' | 'info';
 type ScriptTemplate = { id: string; name: string; script: string };
 type ThemeMode = 'dark' | 'light';
 type ViewMode = 'project' | 'workspace';
-type LayoutTier = 'wide' | 'medium' | 'compact';
-
-function getLayoutTier(width: number): LayoutTier {
-  if (width >= 1536) return 'wide';
-  if (width >= 1200) return 'medium';
-  return 'compact';
-}
 
 type UiNotice = {
   id: string;
   tone: NoticeTone;
   message: string;
 };
+
+const PROVIDER_UI_META: Record<ProviderId, { title: string; hint: string }> = {
+  aihubmix: {
+    title: 'AIHubMix',
+    hint: '第三方聚合，当前版本完整支持 LLM / IMAGE / VIDEO。',
+  },
+  gemini: {
+    title: 'Gemini API',
+    hint: '官方 Gemini 通道，当前版本支持 LLM / IMAGE。',
+  },
+  volcengine: {
+    title: '火山引擎',
+    hint: '当前版本优先用于 VIDEO，LLM/IMAGE 已预留模型配置位。',
+  },
+};
+
+const CAPABILITY_META: Array<{ key: AICapability; label: string }> = [
+  { key: 'llm', label: 'LLM 模型池' },
+  { key: 'image', label: 'IMAGE 模型池' },
+  { key: 'video', label: 'VIDEO 模型池' },
+  { key: 'tts', label: 'TTS 模型池（预留）' },
+  { key: 'music', label: 'MUSIC 模型池（预留）' },
+  { key: 'sfx', label: 'SFX 模型池（预留）' },
+];
 
 const SCRIPT_TEMPLATES: ScriptTemplate[] = [
   {
@@ -91,6 +119,52 @@ const SCRIPT_TEMPLATES: ScriptTemplate[] = [
   },
 ];
 
+function cloneRuntimeEnvConfig(source: RuntimeEnvConfig): RuntimeEnvConfig {
+  return {
+    apiProvider: source.apiProvider,
+    providers: {
+      aihubmix: {
+        ...source.providers.aihubmix,
+        apiKeys: [...source.providers.aihubmix.apiKeys],
+        models: {
+          llm: [...source.providers.aihubmix.models.llm],
+          image: [...source.providers.aihubmix.models.image],
+          video: [...source.providers.aihubmix.models.video],
+          tts: [...source.providers.aihubmix.models.tts],
+          music: [...source.providers.aihubmix.models.music],
+          sfx: [...source.providers.aihubmix.models.sfx],
+        },
+      },
+      gemini: {
+        ...source.providers.gemini,
+        apiKeys: [...source.providers.gemini.apiKeys],
+        models: {
+          llm: [...source.providers.gemini.models.llm],
+          image: [...source.providers.gemini.models.image],
+          video: [...source.providers.gemini.models.video],
+          tts: [...source.providers.gemini.models.tts],
+          music: [...source.providers.gemini.models.music],
+          sfx: [...source.providers.gemini.models.sfx],
+        },
+      },
+      volcengine: {
+        ...source.providers.volcengine,
+        apiKeys: [...source.providers.volcengine.apiKeys],
+        models: {
+          llm: [...source.providers.volcengine.models.llm],
+          image: [...source.providers.volcengine.models.image],
+          video: [...source.providers.volcengine.models.video],
+          tts: [...source.providers.volcengine.models.tts],
+          music: [...source.providers.volcengine.models.music],
+          sfx: [...source.providers.volcengine.models.sfx],
+        },
+      },
+    },
+  };
+}
+
+const DEFAULT_RUNTIME_ENV: RuntimeEnvConfig = cloneRuntimeEnvConfig(DEFAULT_RUNTIME_ENV_CONFIG);
+
 function safeJsonParse<T>(value: string | null, fallback: T): T {
   if (!value) return fallback;
   try {
@@ -107,6 +181,20 @@ function isDataUri(value: unknown): value is string {
 function stripDataUri(value: unknown): string | undefined {
   if (isDataUri(value)) return undefined;
   return typeof value === 'string' ? value : undefined;
+}
+
+function normalizeRendererErrorMessage(error: unknown): string {
+  const raw = typeof (error as any)?.message === 'string' ? (error as any).message : String(error || '');
+  return raw.replace(/^Error invoking remote method '[^']+':\s*/i, '').trim();
+}
+
+function isMissingApiCredentialMessage(message: string): boolean {
+  return (
+    message.includes('Missing AIHUBMIX_API_KEY') ||
+    message.includes('AIHUBMIX_API_KEY_MISSING') ||
+    message.includes('Missing API key') ||
+    message.includes('API_CREDENTIAL_MISSING')
+  );
 }
 
 function normalizeShotState(rawShot: Shot): Shot {
@@ -160,8 +248,16 @@ const App: React.FC = () => {
     const saved = localStorage.getItem(STORAGE_KEYS.CONFIG);
     const parsed = safeJsonParse<GlobalConfig | null>(saved, null);
     if (parsed) {
+      const provider =
+        parsed.apiProvider === 'auto' ||
+        parsed.apiProvider === 'aihubmix' ||
+        parsed.apiProvider === 'gemini' ||
+        parsed.apiProvider === 'volcengine'
+          ? parsed.apiProvider
+          : 'auto';
       return {
         ...parsed,
+        apiProvider: provider,
         characters: parsed.characters.map((c) => ({ ...c, refImage: stripDataUri(c.refImage) })),
         scenes: parsed.scenes.map((s) => ({ ...s, refImage: stripDataUri(s.refImage) })),
         props: parsed.props.map((p) => ({ ...p, refImage: stripDataUri(p.refImage) })),
@@ -174,7 +270,7 @@ const App: React.FC = () => {
       characters: [],
       scenes: [],
       props: [],
-      apiProvider: 'aihubmix',
+      apiProvider: 'auto',
     };
   });
 
@@ -233,15 +329,12 @@ const App: React.FC = () => {
   const [apiStatus, setApiStatus] = useState<ApiStatus>('idle');
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [layoutTier, setLayoutTier] = useState<LayoutTier>(() =>
-    typeof window !== 'undefined' ? getLayoutTier(window.innerWidth) : 'wide',
+  const [runtimeEnvDraft, setRuntimeEnvDraft] = useState<RuntimeEnvConfig>(() =>
+    cloneRuntimeEnvConfig(DEFAULT_RUNTIME_ENV),
   );
-  const [showLeftDrawer, setShowLeftDrawer] = useState(() =>
-    typeof window !== 'undefined' ? getLayoutTier(window.innerWidth) !== 'compact' : true,
-  );
-  const [showRightDrawer, setShowRightDrawer] = useState(() =>
-    typeof window !== 'undefined' ? getLayoutTier(window.innerWidth) === 'wide' : true,
-  );
+  const [isLoadingRuntimeEnv, setIsLoadingRuntimeEnv] = useState(false);
+  const [isSavingRuntimeEnv, setIsSavingRuntimeEnv] = useState(false);
+  const [runtimeEnvNotice, setRuntimeEnvNotice] = useState<string | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.THEME_MODE);
     return saved === 'light' ? 'light' : 'dark';
@@ -297,6 +390,51 @@ const App: React.FC = () => {
       noticeTimersRef.current.set(id, timer);
     },
     [dismissNotice],
+  );
+
+  const promptConfigureApi = useCallback((message?: string) => {
+    setRuntimeEnvNotice(message || '缺少可用 API Key，请先在设置中完成服务商与密钥配置。');
+    setShowSettings(true);
+  }, []);
+
+  const parseListInput = useCallback((value: string) => {
+    return value
+      .split(/[\n,]/g)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }, []);
+
+  const updateRuntimeProvider = useCallback((providerId: ProviderId, updates: Partial<RuntimeEnvConfig['providers'][ProviderId]>) => {
+    setRuntimeEnvDraft((prev) => ({
+      ...prev,
+      providers: {
+        ...prev.providers,
+        [providerId]: {
+          ...prev.providers[providerId],
+          ...updates,
+        },
+      },
+    }));
+  }, []);
+
+  const updateRuntimeProviderModels = useCallback(
+    (providerId: ProviderId, capability: AICapability, value: string) => {
+      const parsed = parseListInput(value);
+      setRuntimeEnvDraft((prev) => ({
+        ...prev,
+        providers: {
+          ...prev.providers,
+          [providerId]: {
+            ...prev.providers[providerId],
+            models: {
+              ...prev.providers[providerId].models,
+              [capability]: parsed,
+            },
+          },
+        },
+      }));
+    },
+    [parseListInput],
   );
 
   const refreshProjects = useCallback(async () => {
@@ -363,36 +501,39 @@ const App: React.FC = () => {
   }, [projects, selectedProjectId]);
 
   useEffect(() => {
-    const onResize = () => {
-      setLayoutTier(getLayoutTier(window.innerWidth));
-    };
-    onResize();
-    window.addEventListener('resize', onResize);
-    return () => {
-      window.removeEventListener('resize', onResize);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (isProjectMode) return;
-    if (layoutTier === 'wide') {
-      setShowLeftDrawer(true);
-      setShowRightDrawer(true);
-      return;
-    }
-    if (layoutTier === 'medium') {
-      setShowLeftDrawer(true);
-      setShowRightDrawer(false);
-      return;
-    }
-    setShowLeftDrawer(false);
-    setShowRightDrawer(false);
-  }, [isProjectMode, layoutTier]);
-
-  useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.THEME_MODE, themeMode);
     document.documentElement.setAttribute('data-theme-mode', themeMode);
   }, [themeMode]);
+
+  useEffect(() => {
+    if (!showSettings) return;
+    if (!window.api?.app?.settings?.getRuntimeEnv) {
+      setRuntimeEnvNotice('当前环境不支持 API 配置写入（仅 Electron 桌面端可用）。');
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingRuntimeEnv(true);
+    window.api.app.settings.getRuntimeEnv()
+      .then((envConfig) => {
+        if (cancelled) return;
+        setRuntimeEnvDraft(cloneRuntimeEnvConfig(envConfig));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        const message = normalizeRendererErrorMessage(error) || '读取 API 配置失败';
+        setRuntimeEnvNotice(message);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingRuntimeEnv(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showSettings]);
 
   useEffect(() => {
     const timer = persistTimers.current.config;
@@ -522,7 +663,7 @@ const App: React.FC = () => {
     }
   }, [shots, selectedShot, selectedShotId]);
 
-  const updateShot = (id: string, updates: Partial<Shot>) => {
+  const updateShot = useCallback((id: string, updates: Partial<Shot>) => {
     setBreakdown((prev) => {
       if (!prev) return null;
       return {
@@ -530,7 +671,134 @@ const App: React.FC = () => {
         shots: prev.shots.map((s) => (s.id === id ? normalizeShotState({ ...s, ...updates }) : s)),
       };
     });
-  };
+  }, []);
+
+  const handleUpdateSelectedShotGridLayout = useCallback(
+    (layoutInput: { rows: number; cols: number }) => {
+      if (!selectedShotId) return;
+      const shot = shots.find((item) => item.id === selectedShotId);
+      if (!shot) return;
+
+      const currentLayout = normalizeGridLayout(shot.gridLayout);
+      const nextLayout = normalizeGridLayout(layoutInput, currentLayout);
+      if (currentLayout.rows === nextLayout.rows && currentLayout.cols === nextLayout.cols) return;
+
+      const nextCellCount = getGridCellCount(nextLayout);
+      const nextPrompts = ensurePromptListLength(shot.matrixPrompts, nextLayout);
+      updateShot(selectedShotId, {
+        gridLayout: nextLayout,
+        matrixPrompts: nextPrompts,
+        generatedImageUrl: undefined,
+        splitImages: [],
+        videoUrls: Array(nextCellCount).fill(null),
+        videoStatus: Array(nextCellCount).fill('idle'),
+        animaticVideoUrl: undefined,
+        assetVideoUrl: undefined,
+      });
+      pushNotice('info', `已切换网格布局为 ${nextLayout.rows}x${nextLayout.cols}。`);
+    },
+    [pushNotice, selectedShotId, shots, updateShot],
+  );
+
+  const handleOptimizePrompts = useCallback(async () => {
+    if (!selectedShot || isOptimizing) return;
+    if (!window.api?.ai?.optimizePrompts) {
+      pushNotice('error', '提示词优化仅在 Electron 桌面端可用。');
+      return;
+    }
+
+    setIsOptimizing(true);
+    try {
+      const optimization = await optimizePrompts(selectedShot, config);
+      const layout = normalizeGridLayout(selectedShot.gridLayout);
+      const nextPrompts = ensurePromptListLength(optimization.optimizedPrompts, layout);
+      const hasPromptOutput = nextPrompts.some((prompt) => prompt.trim().length > 0);
+
+      updateShot(selectedShot.id, {
+        optimization,
+        matrixPrompts: hasPromptOutput ? nextPrompts : ensurePromptListLength(selectedShot.matrixPrompts, layout),
+      });
+      setApiStatus('connected');
+      pushNotice(
+        hasPromptOutput ? 'success' : 'info',
+        hasPromptOutput ? '提示词优化完成，已同步到当前镜头。' : '优化完成，但未返回可用提示词，保留原内容。',
+      );
+    } catch (error: any) {
+      const message = normalizeRendererErrorMessage(error) || '提示词优化失败，请稍后重试。';
+      if (isMissingApiCredentialMessage(message)) {
+        const hint = '缺少可用 API Key，请先在设置中填写后再优化。';
+        promptConfigureApi(hint);
+        pushNotice('error', hint);
+      } else {
+        pushNotice('error', message);
+      }
+      setApiStatus('error');
+    } finally {
+      setIsOptimizing(false);
+    }
+  }, [config, isOptimizing, promptConfigureApi, pushNotice, selectedShot, updateShot]);
+
+  const handleAutoLinkAssets = useCallback(async () => {
+    if (!selectedShot || isAutoLinking) return;
+    if (!window.api?.ai?.recommendAssets) {
+      pushNotice('error', '自动关联资产仅在 Electron 桌面端可用。');
+      return;
+    }
+
+    setIsAutoLinking(true);
+    try {
+      const recommendation = await recommendAssets(selectedShot, config);
+
+      const knownCharacterIds = new Set(config.characters.map((item) => item.id));
+      const knownSceneIds = new Set(config.scenes.map((item) => item.id));
+      const knownPropIds = new Set(config.props.map((item) => item.id));
+
+      const mergeIds = (current: string[] | undefined, next: string[] | undefined, known: Set<string>) =>
+        Array.from(new Set([...(current || []), ...(next || [])])).filter((id) => known.has(id));
+      const countAdded = (current: string[] | undefined, next: string[]) => {
+        const currentSet = new Set(current || []);
+        return next.filter((id) => !currentSet.has(id)).length;
+      };
+
+      const nextCharacterIds = mergeIds(selectedShot.characterIds, recommendation.characterIds, knownCharacterIds);
+      const nextSceneIds = mergeIds(selectedShot.sceneIds, recommendation.sceneIds, knownSceneIds);
+      const nextPropIds = mergeIds(selectedShot.propIds, recommendation.propIds, knownPropIds);
+
+      const addedCharacters = countAdded(selectedShot.characterIds, nextCharacterIds);
+      const addedScenes = countAdded(selectedShot.sceneIds, nextSceneIds);
+      const addedProps = countAdded(selectedShot.propIds, nextPropIds);
+      const totalAdded = addedCharacters + addedScenes + addedProps;
+
+      if (totalAdded === 0) {
+        pushNotice('info', '自动关联完成：未发现可新增的资产关联。');
+        setApiStatus('connected');
+        return;
+      }
+
+      updateShot(selectedShot.id, {
+        characterIds: nextCharacterIds,
+        sceneIds: nextSceneIds,
+        propIds: nextPropIds,
+      });
+      setApiStatus('connected');
+      pushNotice(
+        'success',
+        `自动关联完成：新增 ${addedCharacters} 个角色 / ${addedScenes} 个场景 / ${addedProps} 个道具。`,
+      );
+    } catch (error: any) {
+      const message = normalizeRendererErrorMessage(error) || '自动关联资产失败，请稍后重试。';
+      if (isMissingApiCredentialMessage(message)) {
+        const hint = '缺少可用 API Key，请先在设置中填写后再自动关联。';
+        promptConfigureApi(hint);
+        pushNotice('error', hint);
+      } else {
+        pushNotice('error', message);
+      }
+      setApiStatus('error');
+    } finally {
+      setIsAutoLinking(false);
+    }
+  }, [config, isAutoLinking, promptConfigureApi, pushNotice, selectedShot, updateShot]);
 
   const handleGenerateImage = useCallback(
     async (shotId: string) => {
@@ -598,14 +866,20 @@ const App: React.FC = () => {
         setApiStatus('connected');
         pushNotice('info', '镜头渲染任务已加入队列。');
       } catch (error: any) {
-        const message = typeof error?.message === 'string' ? error.message : 'Unknown error';
-        pushNotice('error', normalizePolicyError(message));
+        const message = normalizeRendererErrorMessage(error) || 'Unknown error';
+        if (isMissingApiCredentialMessage(message)) {
+          const hint = '缺少可用 API Key，请先在设置中配置服务商与密钥后再生成。';
+          promptConfigureApi(hint);
+          pushNotice('error', hint);
+        } else {
+          pushNotice('error', normalizePolicyError(message));
+        }
         setApiStatus('error');
       } finally {
         setIsGeneratingImage(false);
       }
     },
-    [config, episodeId, isGeneratingImage, pushNotice, shots],
+    [config, episodeId, isGeneratingImage, promptConfigureApi, pushNotice, shots],
   );
 
   const runBreakdownForScript = useCallback(
@@ -647,14 +921,21 @@ const App: React.FC = () => {
         pushNotice('success', `${sourceLabel}拆解完成：共生成 ${normalizedResult.shots.length} 个镜头。`);
         return true;
       } catch (error: any) {
-        pushNotice('error', error?.message || '脚本拆解失败，请稍后重试。');
+        const message = normalizeRendererErrorMessage(error) || '脚本拆解失败，请稍后重试。';
+        if (isMissingApiCredentialMessage(message)) {
+          const hint = '缺少可用 API Key，请在设置中填写后重试。';
+          promptConfigureApi(hint);
+          pushNotice('error', hint);
+        } else {
+          pushNotice('error', message);
+        }
         setApiStatus('error');
         return false;
       } finally {
         setIsLoading(false);
       }
     },
-    [config, episodeTitle, pushNotice],
+    [config, episodeTitle, promptConfigureApi, pushNotice],
   );
 
   const handleBreakdown = useCallback(async () => {
@@ -684,11 +965,42 @@ const App: React.FC = () => {
       const success = await runBreakdownForScript(template.script, `模板《${template.name}》`);
       if (success) {
         hideOnboarding();
-        pushNotice('info', '下一步：点击「分镜提示词」后再生成分镜网格图。');
+        pushNotice('info', '下一步：点击「Storyboard 脚本」后再生成「Storyboard 板图」。');
       }
     },
     [hideOnboarding, pushNotice, runBreakdownForScript],
   );
+
+  const handleSaveRuntimeEnv = useCallback(async () => {
+    if (isSavingRuntimeEnv) return;
+    if (!window.api?.app?.settings?.saveRuntimeEnv) {
+      pushNotice('error', '当前环境不支持 API 配置写入。');
+      return;
+    }
+
+    setIsSavingRuntimeEnv(true);
+    try {
+      const saved = await window.api.app.settings.saveRuntimeEnv(runtimeEnvDraft);
+      setRuntimeEnvDraft(cloneRuntimeEnvConfig(saved));
+      setConfig((prev) => ({ ...prev, apiProvider: saved.apiProvider }));
+      const keyCount = Object.values(saved.providers).reduce(
+        (total, provider) => total + provider.apiKeys.length,
+        0,
+      );
+      const noticeMessage =
+        keyCount > 0
+          ? 'API 路由配置已保存，自动降级与多 Key 负载均衡已生效。'
+          : '配置已保存，但尚未填写任何 API Key。';
+      setRuntimeEnvNotice(noticeMessage);
+      pushNotice(keyCount > 0 ? 'success' : 'info', noticeMessage);
+    } catch (error) {
+      const message = normalizeRendererErrorMessage(error) || '保存 API 配置失败';
+      setRuntimeEnvNotice(message);
+      pushNotice('error', message);
+    } finally {
+      setIsSavingRuntimeEnv(false);
+    }
+  }, [isSavingRuntimeEnv, pushNotice, runtimeEnvDraft]);
 
   const handleExportEpisode = useCallback(async () => {
     if (isExporting) return;
@@ -953,8 +1265,6 @@ const App: React.FC = () => {
       if (event.key === 'Escape') {
         setShowShortcuts(false);
         setShowSettings(false);
-        setShowLeftDrawer(false);
-        setShowRightDrawer(false);
       }
 
       if (!isPrimary || isTyping) return;
@@ -1003,6 +1313,7 @@ const App: React.FC = () => {
       episodeId={episodeId}
       isElectronRuntime={isElectronRuntime}
       notify={pushNotice}
+      onUpdateSelectedShotGridLayout={handleUpdateSelectedShotGridLayout}
     />
   );
 
@@ -1035,40 +1346,30 @@ const App: React.FC = () => {
   return (
     <div
       data-theme-mode={themeMode}
-      className="relative flex h-screen w-full overflow-hidden bg-[#0f1115] text-slate-300 font-sans"
+      className="od-shell relative flex h-screen w-full overflow-hidden bg-[#0f1115] text-slate-300 font-sans"
     >
-      {!isProjectMode && showLeftDrawer ? sidebarNode : null}
+      {!isProjectMode ? sidebarNode : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
         {!isElectronRuntime && (
-          <div className="min-h-10 border-b border-amber-400/20 bg-amber-500/10 px-4 py-2 sm:px-6 flex flex-wrap items-center gap-2 justify-between">
-            <div className="flex items-center gap-2 text-amber-200 text-[10px] font-bold uppercase tracking-widest">
+          <div className="od-alert-warning min-h-10 border-b px-4 py-2 sm:px-6 flex flex-wrap items-center gap-2 justify-between">
+            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest">
               <Info size={12} /> 浏览器预览模式
             </div>
-            <span className="text-[10px] text-amber-200/80 leading-relaxed">
+            <span className="text-[10px] leading-relaxed opacity-90">
               任务队列与交付导出仅在 Electron 桌面端生效。
             </span>
           </div>
         )}
 
-        <header className="border-b border-white/10 bg-[#16191f]/80 px-4 py-2 sm:px-6 backdrop-blur-md flex flex-wrap items-center gap-3 justify-between">
+        <header className="od-topbar border-b border-white/10 bg-[#16191f]/80 px-4 py-2 sm:px-6 backdrop-blur-md flex flex-wrap items-center gap-3 justify-between">
           <div className="flex min-w-0 items-center gap-2 sm:gap-4">
-            {!isProjectMode && (
-              <button
-                onClick={() => setShowLeftDrawer((prev) => !prev)}
-                className="h-8 px-2 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[10px] font-black tracking-wide flex items-center gap-1.5"
-                title={showLeftDrawer ? '收起左侧栏' : '展开左侧栏'}
-              >
-                <PanelLeft size={14} />
-                {showLeftDrawer ? '收起左栏' : '展开左栏'}
-              </button>
-            )}
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-              <Cpu size={18} className="text-white" />
+            <div className="w-8 h-8 rounded-lg overflow-hidden border border-white/10 bg-[#101827] flex items-center justify-center">
+              <img src={brandMark} alt="HC Timeline logo" className="w-full h-full object-cover" />
             </div>
             <div className="flex min-w-0 flex-col">
               <h1 className="text-sm font-black text-white tracking-wide uppercase truncate">
-                Omni Director <span className="text-indigo-500">v5.0</span>
+                HC Timeline <span className="od-tone-primary">v1.0</span>
               </h1>
               <span className="text-[9px] text-slate-500 tracking-wider">
                 {isProjectMode ? '项目管理' : `预演工作站 · ${episodeTitle}`}
@@ -1077,23 +1378,12 @@ const App: React.FC = () => {
           </div>
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-            {!isProjectMode && (
-              <button
-                onClick={() => setShowRightDrawer((prev) => !prev)}
-                className="h-8 px-2 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[10px] font-black tracking-wide flex items-center gap-1.5"
-                title={showRightDrawer ? '收起右侧栏' : '展开右侧栏'}
-              >
-                <PanelRight size={14} />
-                {showRightDrawer ? '收起右栏' : '展开右栏'}
-              </button>
-            )}
-
             <button
               onClick={() => setViewMode((prev) => (prev === 'project' ? 'workspace' : 'project'))}
               className={`h-8 px-2 rounded-lg border text-[10px] font-black tracking-wide flex items-center gap-1.5 ${
                 isProjectMode
-                  ? 'border-indigo-400/40 bg-indigo-500/20 text-indigo-100'
-                  : 'border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10'
+                  ? 'od-chip-primary'
+                  : 'od-btn-ghost'
               }`}
               title={isProjectMode ? '返回单集创作页面' : '打开项目管理页面'}
             >
@@ -1103,7 +1393,7 @@ const App: React.FC = () => {
 
             <button
               onClick={() => setThemeMode((prev) => (prev === 'dark' ? 'light' : 'dark'))}
-              className="h-8 w-8 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 flex items-center justify-center"
+              className="od-btn-ghost h-8 w-8 rounded-lg flex items-center justify-center"
               title={themeMode === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
               aria-label={themeMode === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
             >
@@ -1111,32 +1401,12 @@ const App: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setShowOnboarding(true)}
-              className="h-8 w-8 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 flex items-center justify-center"
-              title="重新打开首日上手引导"
-              aria-label="重新打开首日上手引导"
-            >
-              <BookOpenText size={15} />
-            </button>
-
-            <button
-              onClick={() => {
-                setShowSettings(false);
-                setShowShortcuts((prev) => !prev);
-              }}
-              className="h-8 w-8 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 flex items-center justify-center"
-              title="快捷键与工作流提示"
-              aria-label="快捷键与工作流提示"
-            >
-              <Keyboard size={15} />
-            </button>
-
-            <button
               onClick={() => {
                 setShowShortcuts(false);
+                setRuntimeEnvNotice(null);
                 setShowSettings((prev) => !prev);
               }}
-              className="h-8 w-8 rounded-lg border border-white/10 bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 flex items-center justify-center"
+              className="od-btn-ghost h-8 w-8 rounded-lg text-slate-400 flex items-center justify-center"
               title="帮助与设置"
             >
               <Settings size={15} />
@@ -1148,7 +1418,7 @@ const App: React.FC = () => {
           {isProjectMode ? (
             projectNode
           ) : selectedShot ? (
-            <MatrixPromptEditor
+            <StoryboardEditor
               shot={selectedShot}
               allShots={shots}
               config={config}
@@ -1188,8 +1458,8 @@ const App: React.FC = () => {
                   [type]: prev[type].map((item) => (item.id === id ? { ...item, ...updates } : item)),
                 }));
               }}
-              onOptimizePrompts={async () => {}}
-              onAutoLinkAssets={async () => {}}
+              onOptimizePrompts={handleOptimizePrompts}
+              onAutoLinkAssets={handleAutoLinkAssets}
               isGeneratingPrompts={false}
               isGeneratingImage={isGeneratingImage}
               isOptimizing={isOptimizing}
@@ -1200,7 +1470,7 @@ const App: React.FC = () => {
               <p className="text-[11px] tracking-widest">当前未选中镜头</p>
               <button
                 onClick={() => setSelectedShotId(shots[0].id)}
-                className="h-10 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black tracking-widest"
+                className="od-btn-primary h-10 px-5 rounded-lg text-[10px] font-black tracking-widest"
               >
                 选中第一个镜头
               </button>
@@ -1209,7 +1479,7 @@ const App: React.FC = () => {
             <div className="h-full flex flex-col items-center justify-center gap-5 text-slate-500 px-8">
               <p className="text-[11px] tracking-widest">开始创建你的第一组分镜</p>
               <div className="max-w-xl text-center text-[11px] leading-relaxed text-slate-400">
-                在左侧粘贴剧本，点击 <span className="text-indigo-300 font-bold">开始解析剧本</span> 自动拆解镜头，然后在主区域生成分镜网格图与视频预演。
+                在左侧粘贴剧本，点击 <span className="od-tone-primary font-bold">开始解析剧本</span> 自动拆解镜头，然后在主区域生成 storyboard 板图与视频预演。
               </div>
               <button
                 onClick={() => {
@@ -1225,13 +1495,13 @@ const App: React.FC = () => {
                   }
                 }}
                 disabled={!isElectronRuntime || isLoading}
-                className="h-10 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black tracking-widest disabled:opacity-40 disabled:hover:bg-indigo-600"
+                className="od-btn-primary h-10 px-5 rounded-lg text-[10px] font-black tracking-widest"
                 title={quickStartDisabledReason}
               >
                 一键跑通首个镜头
               </button>
               {!isElectronRuntime && (
-                <p className="text-[10px] text-amber-300 text-center">
+                <p className="text-[10px] od-tone-warning text-center">
                   当前为浏览器预览模式，请使用 Electron 桌面端执行 AI 拆解与一键跑通。
                 </p>
               )}
@@ -1240,17 +1510,17 @@ const App: React.FC = () => {
         </main>
       </div>
 
-      {!isProjectMode && showRightDrawer ? globalOpsNode : null}
+      {!isProjectMode ? globalOpsNode : null}
 
       {notices.length > 0 && (
         <div className="fixed bottom-6 right-6 z-[320] flex flex-col gap-2 max-w-[420px]">
           {notices.map((notice) => {
             const toneClass =
               notice.tone === 'success'
-                ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-100'
+                ? 'od-chip-success'
                 : notice.tone === 'error'
-                  ? 'border-red-400/40 bg-red-500/15 text-red-100'
-                  : 'border-indigo-400/40 bg-indigo-500/15 text-indigo-100';
+                  ? 'od-chip-danger'
+                  : 'od-chip-primary';
             const Icon = notice.tone === 'success' ? CheckCircle2 : notice.tone === 'error' ? AlertCircle : Info;
 
             return (
@@ -1270,7 +1540,7 @@ const App: React.FC = () => {
 
       {showOnboarding && (
         <div className="fixed inset-0 z-[330] bg-black/75 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="w-full max-w-4xl rounded-2xl border border-white/10 bg-[#121722] shadow-2xl overflow-hidden">
+          <div className="od-modal-surface w-full max-w-4xl rounded-2xl border border-white/10 bg-[#121722] shadow-2xl overflow-hidden">
             <div className="h-14 px-6 border-b border-white/10 flex items-center justify-between">
               <div className="text-[11px] font-black uppercase tracking-widest text-white">首日上手引导</div>
               <button onClick={() => hideOnboarding()} className="text-slate-400 hover:text-white">
@@ -1282,9 +1552,9 @@ const App: React.FC = () => {
                 {[
                   '1. 选择一个示例模板',
                   '2. 一键拆解镜头并自动选中首镜头',
-                  '3. 先生成分镜提示词，再生成分镜网格图',
+                  '3. 先生成 storyboard 脚本，再生成 storyboard 板图',
                 ].map((step) => (
-                  <div key={step} className="rounded-lg border border-white/10 bg-white/5 px-3 py-3 text-[11px] text-slate-300">
+                  <div key={step} className="od-panel rounded-lg px-3 py-3 text-[11px] text-slate-300">
                     {step}
                   </div>
                 ))}
@@ -1297,9 +1567,9 @@ const App: React.FC = () => {
                     onClick={() => {
                       handleApplyScriptTemplate(template.id);
                     }}
-                    className="text-left rounded-lg border border-white/10 bg-black/30 p-4 hover:border-indigo-400/40 hover:bg-indigo-500/10 transition-all"
+                    className="od-panel-soft od-hover-primary text-left rounded-lg p-4 transition-all"
                   >
-                    <div className="text-[10px] font-black uppercase tracking-widest text-indigo-300 mb-2">{template.name}</div>
+                    <div className="text-[10px] font-black uppercase tracking-widest od-tone-primary mb-2">{template.name}</div>
                     <div className="text-[11px] text-slate-300 line-clamp-4 whitespace-pre-line">{template.script}</div>
                   </button>
                 ))}
@@ -1308,7 +1578,7 @@ const App: React.FC = () => {
             <div className="h-14 px-6 border-t border-white/10 bg-[#0f131d] flex items-center justify-between">
               <button
                 onClick={() => hideOnboarding()}
-                className="h-9 px-4 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 text-[10px] font-black uppercase tracking-widest"
+                className="od-btn-ghost h-9 px-4 rounded-lg text-[10px] font-black uppercase tracking-widest"
               >
                 稍后再说
               </button>
@@ -1320,7 +1590,7 @@ const App: React.FC = () => {
                   });
                 }}
                 disabled={!isElectronRuntime || isLoading}
-                className="h-9 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest disabled:opacity-40 disabled:hover:bg-indigo-600"
+                className="od-btn-primary h-9 px-5 rounded-lg text-[10px] font-black uppercase tracking-widest"
                 title={quickStartDisabledReason}
               >
                 使用默认模板一键跑通
@@ -1332,7 +1602,7 @@ const App: React.FC = () => {
 
       {showShortcuts && (
         <div className="fixed inset-0 z-[310] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="w-full max-w-2xl rounded-xl border border-white/10 bg-[#151922] shadow-2xl overflow-hidden">
+          <div className="od-modal-surface w-full max-w-2xl rounded-xl border border-white/10 bg-[#151922] shadow-2xl overflow-hidden">
             <div className="h-12 px-5 border-b border-white/10 flex items-center justify-between">
               <div className="text-[11px] font-black uppercase tracking-widest text-white">操作提示</div>
               <button onClick={() => setShowShortcuts(false)} className="text-slate-400 hover:text-white">
@@ -1343,17 +1613,17 @@ const App: React.FC = () => {
               <div>
                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">快捷键</div>
                 <ul className="space-y-1">
-                  <li><span className="text-indigo-300 font-bold">Ctrl/Cmd + Enter</span>：执行剧本解析</li>
-                  <li><span className="text-indigo-300 font-bold">Ctrl/Cmd + S</span>：立即保存当前单集</li>
-                  <li><span className="text-indigo-300 font-bold">Esc</span>：关闭当前提示面板</li>
+                  <li><span className="od-tone-primary font-bold">Ctrl/Cmd + Enter</span>：执行剧本解析</li>
+                  <li><span className="od-tone-primary font-bold">Ctrl/Cmd + S</span>：立即保存当前单集</li>
+                  <li><span className="od-tone-primary font-bold">Esc</span>：关闭当前提示面板</li>
                 </ul>
               </div>
               <div>
                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">建议流程</div>
                 <ul className="space-y-1">
                   <li>1. 先在左侧导入/配置资产并填写 Script。</li>
-                  <li>2. 执行剧本解析后逐镜头生成分镜提示词。</li>
-                  <li>3. 生成分镜网格图后再做子机位视频生成，效率更高。</li>
+                  <li>2. 执行剧本解析后逐镜头生成 storyboard 脚本。</li>
+                  <li>3. 生成 storyboard 板图后再做子机位视频生成，效率更高。</li>
                   <li>4. 每轮关键改动后保存 Episode，避免会话丢失。</li>
                 </ul>
               </div>
@@ -1364,19 +1634,166 @@ const App: React.FC = () => {
 
       {showSettings && (
         <div className="fixed inset-0 z-[315] bg-black/70 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="w-full max-w-xl rounded-xl border border-white/10 bg-[#151922] shadow-2xl overflow-hidden">
+          <div className="od-modal-surface w-full max-w-6xl max-h-[92vh] rounded-xl border border-white/10 bg-[#151922] shadow-2xl overflow-hidden flex flex-col">
             <div className="h-12 px-5 border-b border-white/10 flex items-center justify-between">
               <div className="text-[11px] font-black uppercase tracking-widest text-white">设置</div>
               <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white">
                 <X size={16} />
               </button>
             </div>
-            <div className="p-5 space-y-4 text-[11px] text-slate-300">
-              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+            <div className="p-5 space-y-4 text-[11px] text-slate-300 overflow-y-auto custom-scrollbar">
+              <div className="od-panel rounded-lg px-3 py-3">
                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">运行模式</div>
-                <p className={isElectronRuntime ? 'text-emerald-300' : 'text-amber-300'}>
+                <p className={isElectronRuntime ? 'od-tone-success' : 'od-tone-warning'}>
                   {isElectronRuntime ? 'Electron 桌面端' : '浏览器预览模式'}
                 </p>
+              </div>
+
+              <div className="od-panel rounded-lg px-3 py-3 space-y-3">
+                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">API 路由与环境变量</div>
+                {isLoadingRuntimeEnv ? (
+                  <div className="text-[10px] text-slate-400">读取配置中...</div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <label className="space-y-1">
+                        <div className="text-[9px] font-black tracking-widest text-slate-500 uppercase">默认路由策略</div>
+                        <select
+                          value={runtimeEnvDraft.apiProvider}
+                          onChange={(event) => {
+                            const value = event.target.value as RuntimeEnvConfig['apiProvider'];
+                            setRuntimeEnvDraft((prev) => ({ ...prev, apiProvider: value }));
+                            setConfig((prev) => ({ ...prev, apiProvider: value }));
+                          }}
+                          className="od-input w-full h-9 rounded-lg px-2 text-[10px] outline-none"
+                        >
+                          <option value="auto">Auto（按优先级自动降级）</option>
+                          <option value="aihubmix">AIHubMix 优先</option>
+                          <option value="gemini">Gemini 优先</option>
+                          <option value="volcengine">火山引擎优先</option>
+                        </select>
+                      </label>
+                      <div className="od-panel-soft rounded-lg px-3 py-2 text-[10px] text-slate-400 leading-5">
+                        优先级数字越小越优先。单个服务商异常时会自动切换到下一个可用服务商；每个服务商内部会对多 API Key 进行轮转与并发分摊。
+                      </div>
+                    </div>
+
+                    {(['aihubmix', 'gemini', 'volcengine'] as const).map((providerId) => {
+                      const provider = runtimeEnvDraft.providers[providerId];
+                      const meta = PROVIDER_UI_META[providerId];
+                      return (
+                        <div key={providerId} className="rounded-lg border border-white/10 bg-black/20 p-3 space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-[10px] font-black uppercase tracking-widest text-slate-200">
+                                {meta.title}
+                              </div>
+                              <div className="text-[10px] text-slate-500 mt-1">{meta.hint}</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label className="flex items-center gap-1.5 text-[10px] text-slate-300">
+                                <input
+                                  type="checkbox"
+                                  checked={provider.enabled}
+                                  onChange={(event) => updateRuntimeProvider(providerId, { enabled: event.target.checked })}
+                                  className="w-3.5 h-3.5 accent-indigo-500"
+                                />
+                                启用
+                              </label>
+                              <label className="flex items-center gap-1.5 text-[10px] text-slate-300">
+                                优先级
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={provider.priority}
+                                  onChange={(event) => {
+                                    const next = Number(event.target.value);
+                                    updateRuntimeProvider(providerId, {
+                                      priority: Number.isFinite(next) && next > 0 ? Math.round(next) : 1,
+                                    });
+                                  }}
+                                  className="od-input w-16 h-7 rounded-md px-2 text-[10px] outline-none"
+                                />
+                              </label>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <label className="space-y-1">
+                              <div className="text-[9px] font-black tracking-widest text-slate-500 uppercase">
+                                API Keys（逗号/换行分隔）
+                              </div>
+                              <textarea
+                                value={provider.apiKeys.join('\n')}
+                                onChange={(event) =>
+                                  updateRuntimeProvider(providerId, { apiKeys: parseListInput(event.target.value) })
+                                }
+                                rows={3}
+                                placeholder="key_1&#10;key_2"
+                                className="od-input w-full rounded-lg px-2 py-2 text-[10px] outline-none placeholder:text-slate-600"
+                              />
+                            </label>
+                            <div className="grid grid-cols-1 gap-3">
+                              <label className="space-y-1">
+                                <div className="text-[9px] font-black tracking-widest text-slate-500 uppercase">Gemini Base URL</div>
+                                <input
+                                  value={provider.geminiBaseUrl || ''}
+                                  onChange={(event) => updateRuntimeProvider(providerId, { geminiBaseUrl: event.target.value })}
+                                  placeholder="https://..."
+                                  className="od-input w-full h-9 rounded-lg px-2 text-[10px] outline-none placeholder:text-slate-600"
+                                />
+                              </label>
+                              <label className="space-y-1">
+                                <div className="text-[9px] font-black tracking-widest text-slate-500 uppercase">OpenAI Base URL</div>
+                                <input
+                                  value={provider.openaiBaseUrl || ''}
+                                  onChange={(event) => updateRuntimeProvider(providerId, { openaiBaseUrl: event.target.value })}
+                                  placeholder="https://..."
+                                  className="od-input w-full h-9 rounded-lg px-2 text-[10px] outline-none placeholder:text-slate-600"
+                                />
+                              </label>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            {CAPABILITY_META.map((capability) => (
+                              <label key={`${providerId}-${capability.key}`} className="space-y-1">
+                                <div className="text-[9px] font-black tracking-widest text-slate-500 uppercase">
+                                  {capability.label}
+                                </div>
+                                <input
+                                  value={provider.models[capability.key].join(', ')}
+                                  onChange={(event) => updateRuntimeProviderModels(providerId, capability.key, event.target.value)}
+                                  placeholder="model-a, model-b"
+                                  className="od-input w-full h-9 rounded-lg px-2 text-[10px] outline-none placeholder:text-slate-600"
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[10px] text-slate-400">
+                        保存后将立即更新进程环境。任务调用会按优先级自动降级，并在同服务商内按 Key 轮转分配负载。
+                      </p>
+                      <button
+                        onClick={() => {
+                          handleSaveRuntimeEnv().catch((error) => {
+                            console.error('Save runtime env failed', error);
+                          });
+                        }}
+                        disabled={isSavingRuntimeEnv}
+                        className="od-btn-primary h-9 px-4 rounded-lg text-[10px] font-black uppercase tracking-widest"
+                      >
+                        {isSavingRuntimeEnv ? '保存中...' : '保存路由配置'}
+                      </button>
+                    </div>
+
+                    {runtimeEnvNotice ? <p className="text-[10px] od-tone-warning">{runtimeEnvNotice}</p> : null}
+                  </>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1385,7 +1802,7 @@ const App: React.FC = () => {
                     setShowSettings(false);
                     setShowOnboarding(true);
                   }}
-                  className="h-9 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 text-[10px] font-black uppercase tracking-widest"
+                  className="od-btn-ghost h-9 rounded-lg text-[10px] font-black uppercase tracking-widest"
                 >
                   打开首日引导
                 </button>
@@ -1394,7 +1811,7 @@ const App: React.FC = () => {
                     setShowSettings(false);
                     setShowShortcuts(true);
                   }}
-                  className="h-9 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 text-[10px] font-black uppercase tracking-widest"
+                  className="od-btn-ghost h-9 rounded-lg text-[10px] font-black uppercase tracking-widest"
                 >
                   打开快捷键说明
                 </button>

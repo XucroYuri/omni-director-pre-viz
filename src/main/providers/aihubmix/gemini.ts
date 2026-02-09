@@ -27,26 +27,88 @@ import {
   SYSTEM_INSTRUCTION_OPTIMIZE,
   TEXT_MODEL,
 } from '../../../shared/constants';
-import { getAihubmixEnv } from './env';
+import {
+  pickModel,
+  pickModelByKeyword,
+  runWithProviderFallback,
+  type ProviderExecutionContext,
+} from '../router';
 
 type Json = Record<string, unknown> | unknown[];
 
 const clientCache = new Map<string, GoogleGenAI>();
 
-function getClient() {
-  const env = getAihubmixEnv();
-  const cacheKey = `${env.apiKey}@${env.geminiBaseUrl}`;
+function getClient(ctx: ProviderExecutionContext) {
+  if (ctx.transport !== 'gemini') {
+    throw new Error(`Provider ${ctx.providerId} does not support Gemini transport for ${ctx.capability}.`);
+  }
+
+  const baseUrl = ctx.geminiBaseUrl?.trim() || '';
+  const cacheKey = `${ctx.providerId}:${ctx.apiKey}@${baseUrl || 'google-default'}`;
   const existing = clientCache.get(cacheKey);
   if (existing) return existing;
 
-  const ai = new GoogleGenAI({
-    apiKey: env.apiKey,
-    httpOptions: {
-      baseUrl: env.geminiBaseUrl,
-    },
-  });
+  const options: ConstructorParameters<typeof GoogleGenAI>[0] = {
+    apiKey: ctx.apiKey,
+  };
+  if (baseUrl) {
+    options.httpOptions = { baseUrl };
+  }
+
+  const ai = new GoogleGenAI(options);
   clientCache.set(cacheKey, ai);
   return ai;
+}
+
+function uniqueModels(candidates: string[]): string[] {
+  return [...new Set(candidates.map((item) => item.trim()).filter(Boolean))];
+}
+
+function shouldRetryWithNextModel(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('model') ||
+    message.includes('not found') ||
+    message.includes('unsupported') ||
+    message.includes('404')
+  );
+}
+
+async function runWithModelFallback<T>(
+  models: string[],
+  run: (model: string) => Promise<T>,
+): Promise<T> {
+  const queue = uniqueModels(models);
+  let lastError: unknown = null;
+  for (let index = 0; index < queue.length; index += 1) {
+    const model = queue[index];
+    try {
+      return await run(model);
+    } catch (error) {
+      lastError = error;
+      if (!shouldRetryWithNextModel(error) || index === queue.length - 1) {
+        throw error;
+      }
+    }
+  }
+  throw lastError || new Error('No model candidates available.');
+}
+
+function llmModelCandidates(ctx: ProviderExecutionContext, preferred?: string): string[] {
+  const pool = ctx.models.llm || [];
+  if (preferred) {
+    return uniqueModels([preferred, ...pool, TEXT_MODEL]);
+  }
+  return uniqueModels([pickModel(pool, TEXT_MODEL), ...pool, TEXT_MODEL]);
+}
+
+function imageModelCandidates(ctx: ProviderExecutionContext, preferred?: string): string[] {
+  const pool = ctx.models.image || [];
+  if (preferred) {
+    return uniqueModels([preferred, ...pool, IMAGE_MODEL]);
+  }
+  return uniqueModels([pickModel(pool, IMAGE_MODEL), ...pool, IMAGE_MODEL]);
 }
 
 function safeJsonParse(text: string): Json | null {
@@ -250,34 +312,37 @@ function extractLineWindow(lines: string[], startLine: number, endLine: number, 
 
 async function generateScriptOverview(
   ai: GoogleGenAI,
+  llmCandidates: string[],
   script: string,
   scenes: SceneTableItem[],
   beats: BeatTableItem[],
 ): Promise<{ context: string; scriptOverview: string }> {
-  const overviewResponse = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
-    contents: [
-      '任务1：快速通读并生成单集剧情概述（不超过220字）。',
-      '任务2：总结主要冲突线索（3-6条）。',
-      '任务3：总结影像制作关注点（3-6条，包含场景调度/情绪/节奏）。',
-      `场景总数：${scenes.length}，节拍总数：${beats.length}`,
-      '请务必仅基于原文，不得杜撰剧情。',
-      script,
-    ].join('\n\n'),
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          context: { type: Type.STRING },
-          overview: { type: Type.STRING },
-          storyAxes: { type: Type.ARRAY, items: { type: Type.STRING } },
-          productionNotes: { type: Type.ARRAY, items: { type: Type.STRING } },
+  const overviewResponse = await runWithModelFallback(llmCandidates, async (model) =>
+    ai.models.generateContent({
+      model,
+      contents: [
+        '任务1：快速通读并生成单集剧情概述（不超过220字）。',
+        '任务2：总结主要冲突线索（3-6条）。',
+        '任务3：总结影像制作关注点（3-6条，包含场景调度/情绪/节奏）。',
+        `场景总数：${scenes.length}，节拍总数：${beats.length}`,
+        '请务必仅基于原文，不得杜撰剧情。',
+        script,
+      ].join('\n\n'),
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            context: { type: Type.STRING },
+            overview: { type: Type.STRING },
+            storyAxes: { type: Type.ARRAY, items: { type: Type.STRING } },
+            productionNotes: { type: Type.ARRAY, items: { type: Type.STRING } },
+          },
+          required: ['context', 'overview', 'storyAxes', 'productionNotes'],
         },
-        required: ['context', 'overview', 'storyAxes', 'productionNotes'],
       },
-    },
-  });
+    }),
+  );
   const parsed = (safeJsonParse(overviewResponse.text || '{}') as any) || {};
   const context = String(parsed.context || '').trim();
   const overview = String(parsed.overview || '').trim();
@@ -295,58 +360,64 @@ async function generateScriptOverview(
   };
 }
 
-async function extractScriptAssets(ai: GoogleGenAI, script: string): Promise<ScriptAssetExtraction> {
-  const response = await ai.models.generateContent({
-    model: TEXT_MODEL,
-    contents: [
-      '仅基于输入剧本提取角色、场景、道具三类视觉描述候选。',
-      '禁止杜撰人物关系、外观、材质、时代背景。',
-      '每条描述使用原文可证据化信息，不足时明确写“剧本未明确描述”。',
-      script.slice(0, MAX_SCRIPT_CHARS_FOR_ASSET_EXTRACTION),
-    ].join('\n\n'),
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          characters: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                description: { type: Type.STRING },
+async function extractScriptAssets(
+  ai: GoogleGenAI,
+  llmCandidates: string[],
+  script: string,
+): Promise<ScriptAssetExtraction> {
+  const response = await runWithModelFallback(llmCandidates, async (model) =>
+    ai.models.generateContent({
+      model,
+      contents: [
+        '仅基于输入剧本提取角色、场景、道具三类视觉描述候选。',
+        '禁止杜撰人物关系、外观、材质、时代背景。',
+        '每条描述使用原文可证据化信息，不足时明确写“剧本未明确描述”。',
+        script.slice(0, MAX_SCRIPT_CHARS_FOR_ASSET_EXTRACTION),
+      ].join('\n\n'),
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            characters: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                },
+                required: ['name', 'description'],
               },
-              required: ['name', 'description'],
+            },
+            scenes: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                },
+                required: ['name', 'description'],
+              },
+            },
+            props: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                },
+                required: ['name', 'description'],
+              },
             },
           },
-          scenes: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                description: { type: Type.STRING },
-              },
-              required: ['name', 'description'],
-            },
-          },
-          props: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                name: { type: Type.STRING },
-                description: { type: Type.STRING },
-              },
-              required: ['name', 'description'],
-            },
-          },
+          required: ['characters', 'scenes', 'props'],
         },
-        required: ['characters', 'scenes', 'props'],
       },
-    },
-  });
+    }),
+  );
 
   const parsed = (safeJsonParse(response.text || '{}') as any) || {};
   return {
@@ -364,6 +435,7 @@ async function extractScriptAssets(ai: GoogleGenAI, script: string): Promise<Scr
 
 async function breakdownShotsForBeatChunk(
   ai: GoogleGenAI,
+  llmCandidates: string[],
   params: {
     scriptLines: string[];
     scriptOverview: string;
@@ -393,46 +465,48 @@ async function breakdownShotsForBeatChunk(
     })
     .join('\n\n---\n\n');
 
-  const response = await ai.models.generateContent({
-    model: TEXT_MODEL,
-    contents: [
-      '你是影视分镜导演，请将每个 Beat 拆成 1~3 个镜头组（shots）。',
-      '必须返回 JSON 数组，每个元素都必须包含 beatId, originalText, visualTranslation, contextTag, shotKind。',
-      'shotKind 仅允许 CHAR / ENV / POV / INSERT / MIXED。',
-      '并补充脚本映射字段：sceneHeading/action/characters/dialogue/parenthetical/transition/sfx/bgm/vfx/sourceStartLine/sourceEndLine。',
-      '所有内容必须由输入节拍原文支持，禁止杜撰。',
-      `全局压缩上下文:\n${params.scriptOverview}`,
-      beatsPrompt,
-    ].join('\n\n'),
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            beatId: { type: Type.STRING },
-            originalText: { type: Type.STRING },
-            visualTranslation: { type: Type.STRING },
-            contextTag: { type: Type.STRING },
-            shotKind: { type: Type.STRING },
-            sceneHeading: { type: Type.STRING },
-            action: { type: Type.STRING },
-            characters: { type: Type.ARRAY, items: { type: Type.STRING } },
-            dialogue: { type: Type.ARRAY, items: { type: Type.STRING } },
-            parenthetical: { type: Type.ARRAY, items: { type: Type.STRING } },
-            transition: { type: Type.STRING },
-            sfx: { type: Type.ARRAY, items: { type: Type.STRING } },
-            bgm: { type: Type.ARRAY, items: { type: Type.STRING } },
-            vfx: { type: Type.ARRAY, items: { type: Type.STRING } },
-            sourceStartLine: { type: Type.NUMBER },
-            sourceEndLine: { type: Type.NUMBER },
+  const response = await runWithModelFallback(llmCandidates, async (model) =>
+    ai.models.generateContent({
+      model,
+      contents: [
+        '你是影视分镜导演，请将每个 Beat 拆成 1~3 个镜头组（shots）。',
+        '必须返回 JSON 数组，每个元素都必须包含 beatId, originalText, visualTranslation, contextTag, shotKind。',
+        'shotKind 仅允许 CHAR / ENV / POV / INSERT / MIXED。',
+        '并补充脚本映射字段：sceneHeading/action/characters/dialogue/parenthetical/transition/sfx/bgm/vfx/sourceStartLine/sourceEndLine。',
+        '所有内容必须由输入节拍原文支持，禁止杜撰。',
+        `全局压缩上下文:\n${params.scriptOverview}`,
+        beatsPrompt,
+      ].join('\n\n'),
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              beatId: { type: Type.STRING },
+              originalText: { type: Type.STRING },
+              visualTranslation: { type: Type.STRING },
+              contextTag: { type: Type.STRING },
+              shotKind: { type: Type.STRING },
+              sceneHeading: { type: Type.STRING },
+              action: { type: Type.STRING },
+              characters: { type: Type.ARRAY, items: { type: Type.STRING } },
+              dialogue: { type: Type.ARRAY, items: { type: Type.STRING } },
+              parenthetical: { type: Type.ARRAY, items: { type: Type.STRING } },
+              transition: { type: Type.STRING },
+              sfx: { type: Type.ARRAY, items: { type: Type.STRING } },
+              bgm: { type: Type.ARRAY, items: { type: Type.STRING } },
+              vfx: { type: Type.ARRAY, items: { type: Type.STRING } },
+              sourceStartLine: { type: Type.NUMBER },
+              sourceEndLine: { type: Type.NUMBER },
+            },
+            required: ['beatId', 'originalText', 'visualTranslation', 'contextTag', 'shotKind'],
           },
-          required: ['beatId', 'originalText', 'visualTranslation', 'contextTag', 'shotKind'],
         },
       },
-    },
-  });
+    }),
+  );
 
   const parsed = safeJsonParse(response.text || '[]');
   if (!Array.isArray(parsed)) return [];
@@ -496,173 +570,216 @@ function fallbackShotsFromBeats(beats: BeatTableItem[]): ScriptBreakdownResponse
 }
 
 export async function breakdownScript(script: string, config: GlobalConfig): Promise<ScriptBreakdownResponse> {
-  const ai = getClient();
-  const scriptLines = splitScriptLines(script);
-  const sceneTable = buildSceneTable(scriptLines);
-  const beatTable = buildBeatTable(scriptLines, sceneTable);
+  return runWithProviderFallback({
+    capability: 'llm',
+    preferredProvider: config.apiProvider,
+    taskName: 'breakdownScript',
+    operation: async (ctx) => {
+      const ai = getClient(ctx);
+      const scriptLines = splitScriptLines(script);
+      const sceneTable = buildSceneTable(scriptLines);
+      const beatTable = buildBeatTable(scriptLines, sceneTable);
+      const llmCandidates = llmModelCandidates(ctx);
+      const overviewCandidates = llmModelCandidates(
+        ctx,
+        pickModelByKeyword(ctx.models.llm, 'flash', llmCandidates[0] || TEXT_MODEL),
+      );
 
-  const overview = await generateScriptOverview(ai, script, sceneTable, beatTable);
-  const extractedAssets = await extractScriptAssets(ai, script).catch(() => ({ characters: [], scenes: [], props: [] }));
+      const overview = await generateScriptOverview(ai, overviewCandidates, script, sceneTable, beatTable);
+      const extractedAssets = await extractScriptAssets(ai, llmCandidates, script).catch(() => ({
+        characters: [],
+        scenes: [],
+        props: [],
+      }));
 
-  const shotDrafts: Array<{
-    beatId: string;
-    originalText: string;
-    visualTranslation: string;
-    contextTag: string;
-    shotKind: Shot['shotKind'];
-    scriptMapping: ShotScriptMapping;
-  }> = [];
+      const shotDrafts: Array<{
+        beatId: string;
+        originalText: string;
+        visualTranslation: string;
+        contextTag: string;
+        shotKind: Shot['shotKind'];
+        scriptMapping: ShotScriptMapping;
+      }> = [];
 
-  for (const beatChunk of chunkBeats(beatTable)) {
-    try {
-      const chunkShots = await breakdownShotsForBeatChunk(ai, {
-        scriptLines,
+      for (const beatChunk of chunkBeats(beatTable)) {
+        try {
+          const chunkShots = await breakdownShotsForBeatChunk(ai, llmCandidates, {
+            scriptLines,
+            scriptOverview: overview.scriptOverview,
+            scenes: sceneTable,
+            beats: beatChunk,
+          });
+          shotDrafts.push(...chunkShots);
+        } catch (error) {
+          console.warn('Shot chunk breakdown failed, fallback to beat-level shot.', error);
+        }
+      }
+
+      const fallbackShots = fallbackShotsFromBeats(beatTable);
+      const shots =
+        shotDrafts.length > 0
+          ? shotDrafts.map((item, index) => {
+              const beat = beatTable.find((row) => row.id === item.beatId);
+              const gridLayout = normalizeGridLayout();
+              const cellCount = getGridCellCount(gridLayout);
+              return {
+                id: `sh_${String(index + 1).padStart(4, '0')}`,
+                originalText: item.originalText || beat?.startLineText || '',
+                visualTranslation: item.visualTranslation,
+                contextTag: item.contextTag || '镜头',
+                sceneId: beat?.sceneId,
+                beatId: item.beatId,
+                scriptMapping: {
+                  ...item.scriptMapping,
+                  sourceStartLine: item.scriptMapping.sourceStartLine || beat?.startLine,
+                  sourceEndLine: item.scriptMapping.sourceEndLine || beat?.endLine,
+                },
+                shotKind: item.shotKind || 'MIXED',
+                gridLayout,
+                matrixPrompts: Array(cellCount).fill(''),
+                status: 'pending' as const,
+                progress: 0,
+                characterIds: [],
+                sceneIds: [],
+                propIds: [],
+                videoUrls: Array(cellCount).fill(null),
+                videoStatus: Array(cellCount).fill('idle'),
+              };
+            })
+          : fallbackShots;
+
+      return {
+        context: overview.context || SYSTEM_INSTRUCTION_BREAKDOWN.trim(),
         scriptOverview: overview.scriptOverview,
-        scenes: sceneTable,
-        beats: beatChunk,
-      });
-      shotDrafts.push(...chunkShots);
-    } catch (error) {
-      console.warn('Shot chunk breakdown failed, fallback to beat-level shot.', error);
-    }
-  }
-
-  const fallbackShots = fallbackShotsFromBeats(beatTable);
-  const shots =
-    shotDrafts.length > 0
-      ? shotDrafts.map((item, index) => {
-          const beat = beatTable.find((row) => row.id === item.beatId);
-          const gridLayout = normalizeGridLayout();
-          const cellCount = getGridCellCount(gridLayout);
-          return {
-            id: `sh_${String(index + 1).padStart(4, '0')}`,
-            originalText: item.originalText || beat?.startLineText || '',
-            visualTranslation: item.visualTranslation,
-            contextTag: item.contextTag || '镜头',
-            sceneId: beat?.sceneId,
-            beatId: item.beatId,
-            scriptMapping: {
-              ...item.scriptMapping,
-              sourceStartLine: item.scriptMapping.sourceStartLine || beat?.startLine,
-              sourceEndLine: item.scriptMapping.sourceEndLine || beat?.endLine,
-            },
-            shotKind: item.shotKind || 'MIXED',
-            gridLayout,
-            matrixPrompts: Array(cellCount).fill(''),
-            status: 'pending' as const,
-            progress: 0,
-            characterIds: [],
-            sceneIds: [],
-            propIds: [],
-            videoUrls: Array(cellCount).fill(null),
-            videoStatus: Array(cellCount).fill('idle'),
-          };
-        })
-      : fallbackShots;
-
-  return {
-    context: overview.context || SYSTEM_INSTRUCTION_BREAKDOWN.trim(),
-    scriptOverview: overview.scriptOverview,
-    sceneTable,
-    beatTable,
-    extractedAssets,
-    shots,
-    characters: extractedAssets.characters.map((item) => ({ name: item.name, description: item.description })),
-  };
+        sceneTable,
+        beatTable,
+        extractedAssets,
+        shots,
+        characters: extractedAssets.characters.map((item) => ({ name: item.name, description: item.description })),
+      };
+    },
+  });
 }
 
 export async function recommendAssets(shot: Shot, config: GlobalConfig): Promise<RecommendAssetsResult> {
-  const ai = getClient();
-  const assetLibrary = {
-    characters: config.characters.map((c) => ({ id: c.id, name: c.name, description: c.description })),
-    scenes: config.scenes.map((s) => ({ id: s.id, name: s.name, description: s.description })),
-    props: config.props.map((p) => ({ id: p.id, name: p.name, description: p.description })),
-  };
+  return runWithProviderFallback({
+    capability: 'llm',
+    preferredProvider: config.apiProvider,
+    taskName: 'recommendAssets',
+    operation: async (ctx) => {
+      const ai = getClient(ctx);
+      const assetLibrary = {
+        characters: config.characters.map((c) => ({ id: c.id, name: c.name, description: c.description })),
+        scenes: config.scenes.map((s) => ({ id: s.id, name: s.name, description: s.description })),
+        props: config.props.map((p) => ({ id: p.id, name: p.name, description: p.description })),
+      };
 
-  const response = await ai.models.generateContent({
-    model: TEXT_MODEL,
-    contents: `镜头描述: ${shot.visualTranslation}\n资产库: ${JSON.stringify(assetLibrary)}`,
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          characterIds: { type: Type.ARRAY, items: { type: Type.STRING } },
-          sceneIds: { type: Type.ARRAY, items: { type: Type.STRING } },
-          propIds: { type: Type.ARRAY, items: { type: Type.STRING } },
-        },
-        required: ['characterIds', 'sceneIds', 'propIds'],
-      },
+      const response = await runWithModelFallback(llmModelCandidates(ctx), (model) =>
+        ai.models.generateContent({
+          model,
+          contents: `镜头描述: ${shot.visualTranslation}\n资产库: ${JSON.stringify(assetLibrary)}`,
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                characterIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+                sceneIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+                propIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+              },
+              required: ['characterIds', 'sceneIds', 'propIds'],
+            },
+          },
+        }),
+      );
+
+      return (safeJsonParse(response.text || '{"characterIds":[],"sceneIds":[],"propIds":[]}') as any) || {
+        characterIds: [],
+        sceneIds: [],
+        propIds: [],
+      };
     },
   });
-
-  return (safeJsonParse(response.text || '{"characterIds":[],"sceneIds":[],"propIds":[]}') as any) || {
-    characterIds: [],
-    sceneIds: [],
-    propIds: [],
-  };
 }
 
 export async function generateMatrixPrompts(shot: Shot, config: GlobalConfig): Promise<string[]> {
-  const ai = getClient();
-  const gridLayout = normalizeGridLayout(shot.gridLayout);
-  const cellCount = getGridCellCount(gridLayout);
-  const assetInjection = buildAssetInjection(shot, config);
-  const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
-  const response = await ai.models.generateContent({
-    model: TEXT_MODEL,
-    contents: [
-      `全局风格: ${config.artStyle}`,
-      assetLine,
-      `网格规格: ${gridLayout.rows}x${gridLayout.cols}（共 ${cellCount} 格）`,
-      `镜头描述: ${shot.visualTranslation}`,
-      `请返回 ${cellCount} 条 Prompt，顺序严格为 ${Array.from({ length: cellCount }, (_item, index) => getAngleLabel(index)).join(', ')}`,
-    ].join('\n'),
-    config: {
-      systemInstruction: SYSTEM_INSTRUCTION_MATRIX,
-      responseMimeType: 'application/json',
-      responseSchema: { type: Type.ARRAY, items: { type: Type.STRING } },
+  return runWithProviderFallback({
+    capability: 'llm',
+    preferredProvider: config.apiProvider,
+    taskName: 'generateMatrixPrompts',
+    operation: async (ctx) => {
+      const ai = getClient(ctx);
+      const gridLayout = normalizeGridLayout(shot.gridLayout);
+      const cellCount = getGridCellCount(gridLayout);
+      const assetInjection = buildAssetInjection(shot, config);
+      const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
+      const response = await runWithModelFallback(llmModelCandidates(ctx), (model) =>
+        ai.models.generateContent({
+          model,
+          contents: [
+            `全局风格: ${config.artStyle}`,
+            assetLine,
+            `网格规格: ${gridLayout.rows}x${gridLayout.cols}（共 ${cellCount} 格）`,
+            `镜头描述: ${shot.visualTranslation}`,
+            `请返回 ${cellCount} 条 Prompt，顺序严格为 ${Array.from({ length: cellCount }, (_item, index) => getAngleLabel(index)).join(', ')}`,
+          ].join('\n'),
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION_MATRIX,
+            responseMimeType: 'application/json',
+            responseSchema: { type: Type.ARRAY, items: { type: Type.STRING } },
+          },
+        }),
+      );
+      const parsed = safeJsonParse(response.text || '[]');
+      const rawPrompts = Array.isArray(parsed) ? parsed.map((item) => String(item || '')) : [];
+      return ensurePromptListLength(rawPrompts, gridLayout).map((prompt, index) => {
+        const label = getAngleLabel(index);
+        const trimmed = prompt.trim();
+        if (!trimmed) return `${label}: ${shot.visualTranslation}`;
+        return /^Angle_\d+\s*[:：]/i.test(trimmed) ? trimmed : `${label}: ${trimmed}`;
+      });
     },
-  });
-  const parsed = safeJsonParse(response.text || '[]');
-  const rawPrompts = Array.isArray(parsed) ? parsed.map((item) => String(item || '')) : [];
-  return ensurePromptListLength(rawPrompts, gridLayout).map((prompt, index) => {
-    const label = getAngleLabel(index);
-    const trimmed = prompt.trim();
-    if (!trimmed) return `${label}: ${shot.visualTranslation}`;
-    return /^Angle_\d+\s*[:：]/i.test(trimmed) ? trimmed : `${label}: ${trimmed}`;
   });
 }
 
 export async function optimizePrompts(shot: Shot, config: GlobalConfig) {
-  const ai = getClient();
-  const assetInjection = buildAssetInjection(shot, config);
-  const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
-  const response = await ai.models.generateContent({
-    model: TEXT_MODEL,
-    contents: `全局风格: ${config.artStyle}\n${assetLine}\n镜头描述: ${shot.visualTranslation}\n当前 Prompts: ${JSON.stringify(
-      shot.matrixPrompts || [],
-    )}`,
-    config: {
-      systemInstruction: SYSTEM_INSTRUCTION_OPTIMIZE,
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          critique: { type: Type.STRING },
-          suggestions: { type: Type.ARRAY, items: { type: Type.STRING } },
-          optimizedPrompts: { type: Type.ARRAY, items: { type: Type.STRING } },
-        },
-        required: ['critique', 'suggestions', 'optimizedPrompts'],
-      },
+  return runWithProviderFallback({
+    capability: 'llm',
+    preferredProvider: config.apiProvider,
+    taskName: 'optimizePrompts',
+    operation: async (ctx) => {
+      const ai = getClient(ctx);
+      const assetInjection = buildAssetInjection(shot, config);
+      const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
+      const response = await runWithModelFallback(llmModelCandidates(ctx), (model) =>
+        ai.models.generateContent({
+          model,
+          contents: `全局风格: ${config.artStyle}\n${assetLine}\n镜头描述: ${shot.visualTranslation}\n当前 Prompts: ${JSON.stringify(
+            shot.matrixPrompts || [],
+          )}`,
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION_OPTIMIZE,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                critique: { type: Type.STRING },
+                suggestions: { type: Type.ARRAY, items: { type: Type.STRING } },
+                optimizedPrompts: { type: Type.ARRAY, items: { type: Type.STRING } },
+              },
+              required: ['critique', 'suggestions', 'optimizedPrompts'],
+            },
+          },
+        }),
+      );
+      const result = (safeJsonParse(response.text || '{}') as any) || {};
+      return {
+        critique: result.critique || '',
+        suggestions: result.suggestions || [],
+        optimizedPrompts: result.optimizedPrompts || [],
+      };
     },
   });
-  const result = (safeJsonParse(response.text || '{}') as any) || {};
-  return {
-    critique: result.critique || '',
-    suggestions: result.suggestions || [],
-    optimizedPrompts: result.optimizedPrompts || [],
-  };
 }
 
 const IMAGE_PRESET_PREFIX = `[生成约束/不可省略]
@@ -677,20 +794,25 @@ export async function generateGridImage(
   config: GlobalConfig,
   signal?: AbortSignal,
 ): Promise<{ path: string; dataUri: string }> {
-  const ai = getClient();
-  const gridLayout = normalizeGridLayout(shot.gridLayout);
-  const cellCount = getGridCellCount(gridLayout);
-  const prompts = ensurePromptListLength(shot.matrixPrompts, gridLayout);
-  if (!prompts.some((prompt) => prompt.trim())) {
-    throw new Error('matrixPrompts cannot be empty');
-  }
+  return runWithProviderFallback({
+    capability: 'image',
+    preferredProvider: config.apiProvider,
+    taskName: 'generateGridImage',
+    operation: async (ctx) => {
+      const ai = getClient(ctx);
+      const gridLayout = normalizeGridLayout(shot.gridLayout);
+      const cellCount = getGridCellCount(gridLayout);
+      const prompts = ensurePromptListLength(shot.matrixPrompts, gridLayout);
+      if (!prompts.some((prompt) => prompt.trim())) {
+        throw new Error('matrixPrompts cannot be empty');
+      }
 
-  validateShotConsistency(shot, config);
-  const assetInjection = buildAssetInjection(shot, config);
-  const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
-  const angleLines = prompts.map((prompt, index) => `${getAngleLabel(index)}: ${prompt || shot.visualTranslation}`).join('\n');
+      validateShotConsistency(shot, config);
+      const assetInjection = buildAssetInjection(shot, config);
+      const assetLine = assetInjection ? `资产绑定: ${assetInjection}` : '资产绑定: 无';
+      const angleLines = prompts.map((prompt, index) => `${getAngleLabel(index)}: ${prompt || shot.visualTranslation}`).join('\n');
 
-  const compositePrompt = `${IMAGE_PRESET_PREFIX}
+      const compositePrompt = `${IMAGE_PRESET_PREFIX}
 全局风格: ${config.artStyle}
 ${assetLine}
 网格规格: ${gridLayout.rows} 行 x ${gridLayout.cols} 列（共 ${cellCount} 格）
@@ -701,63 +823,73 @@ ${angleLines}
 
 输出要求：单张 ${gridLayout.rows}x${gridLayout.cols} 网格母图，无明显网格线，视觉连贯。`;
 
-  const parts: any[] = [];
-  const selectedAssetsWithImages = [
-    ...config.characters.filter((c) => shot.characterIds?.includes(c.id)),
-    ...config.scenes.filter((s) => shot.sceneIds?.includes(s.id)),
-    ...config.props.filter((p) => shot.propIds?.includes(p.id)),
-  ].filter((a) => a.refImage);
+      const parts: any[] = [];
+      const selectedAssetsWithImages = [
+        ...config.characters.filter((c) => shot.characterIds?.includes(c.id)),
+        ...config.scenes.filter((s) => shot.sceneIds?.includes(s.id)),
+        ...config.props.filter((p) => shot.propIds?.includes(p.id)),
+      ].filter((a) => a.refImage);
 
-  for (const asset of selectedAssetsWithImages) {
-    const { base64, mimeType } = parseDataUri(asset.refImage!);
-    const filename = `asset_${asset.id}.png`;
+      for (const asset of selectedAssetsWithImages) {
+        const { base64, mimeType } = parseDataUri(asset.refImage!);
+        const filename = `asset_${asset.id}.png`;
 
-    let semantics = `参考图说明：图片文件名=${filename}。`;
-    if (config.characters.some((c) => c.id === asset.id)) {
-      semantics = `参考图说明（角色资产）：[角色名]${asset.name} ↔ [图片文件名]${filename}。用途=保持角色一致性（外观/服饰/特征）。`;
-    } else if (config.scenes.some((s) => s.id === asset.id)) {
-      semantics = `参考图说明（场景资产）：[参考：${filename}]。用途=保持场景一致性（环境/构图/光线）。`;
-    } else if (config.props.some((p) => p.id === asset.id)) {
-      semantics = `参考图说明（道具资产）：[参考图：${filename}]。用途=保持道具主体一致性（形态/材质/细节）。`;
-    }
+        let semantics = `参考图说明：图片文件名=${filename}。`;
+        if (config.characters.some((c) => c.id === asset.id)) {
+          semantics = `参考图说明（角色资产）：[角色名]${asset.name} ↔ [图片文件名]${filename}。用途=保持角色一致性（外观/服饰/特征）。`;
+        } else if (config.scenes.some((s) => s.id === asset.id)) {
+          semantics = `参考图说明（场景资产）：[参考：${filename}]。用途=保持场景一致性（环境/构图/光线）。`;
+        } else if (config.props.some((p) => p.id === asset.id)) {
+          semantics = `参考图说明（道具资产）：[参考图：${filename}]。用途=保持道具主体一致性（形态/材质/细节）。`;
+        }
 
-    parts.push({ inlineData: { data: base64, mimeType } });
-    parts.push({ text: semantics });
-  }
+        parts.push({ inlineData: { data: base64, mimeType } });
+        parts.push({ text: semantics });
+      }
 
-  const response = await ai.models.generateContent({
-    model: IMAGE_MODEL,
-    contents: { parts: [...parts, { text: compositePrompt }] },
-    config: {
-      responseModalities: ['TEXT', 'IMAGE'],
-      imageConfig: { aspectRatio: config.aspectRatio, imageSize: config.resolution as any },
-      abortSignal: signal,
+      const response = await runWithModelFallback(imageModelCandidates(ctx), (model) =>
+        ai.models.generateContent({
+          model,
+          contents: { parts: [...parts, { text: compositePrompt }] },
+          config: {
+            responseModalities: ['TEXT', 'IMAGE'],
+            imageConfig: { aspectRatio: config.aspectRatio, imageSize: config.resolution as any },
+            abortSignal: signal,
+          },
+        }),
+      );
+
+      const candidate = response.candidates?.[0];
+      const inline = candidate?.content?.parts?.find((p: any) => p.inlineData)?.inlineData;
+      if (!inline?.data) throw new Error('Image generation returned no inline image data');
+
+      const base64Png = inline.data;
+      await fs.mkdir(path.join(ctx.outputDir, 'images'), { recursive: true });
+      const hash = crypto.createHash('sha1').update(base64Png).digest('hex').slice(0, 12);
+      const filePath = path.join(ctx.outputDir, 'images', `grid_${shot.id}_${hash}.png`);
+      await fs.writeFile(filePath, Buffer.from(base64Png, 'base64'));
+
+      return { path: filePath, dataUri: `data:image/png;base64,${base64Png}` };
     },
   });
-
-  const candidate = response.candidates?.[0];
-  const inline = candidate?.content?.parts?.find((p: any) => p.inlineData)?.inlineData;
-  if (!inline?.data) throw new Error('Image generation returned no inline image data');
-
-  const base64Png = inline.data;
-
-  const { outputDir } = getAihubmixEnv();
-  await fs.mkdir(path.join(outputDir, 'images'), { recursive: true });
-  const hash = crypto.createHash('sha1').update(base64Png).digest('hex').slice(0, 12);
-  const filePath = path.join(outputDir, 'images', `grid_${shot.id}_${hash}.png`);
-  await fs.writeFile(filePath, Buffer.from(base64Png, 'base64'));
-
-  return { path: filePath, dataUri: `data:image/png;base64,${base64Png}` };
 }
 
 export async function enhanceAssetDescription(name: string, currentDesc: string): Promise<string> {
-  const ai = getClient();
-  const response = await ai.models.generateContent({
-    model: TEXT_MODEL,
-    contents: `为“${name}”扩充视觉描述。原描述：“${currentDesc}”。覆盖材质、色彩、光影。只返回文字。`,
-    config: { thinkingConfig: { thinkingBudget: 512 } },
+  return runWithProviderFallback({
+    capability: 'llm',
+    taskName: 'enhanceAssetDescription',
+    operation: async (ctx) => {
+      const ai = getClient(ctx);
+      const response = await runWithModelFallback(llmModelCandidates(ctx), (model) =>
+        ai.models.generateContent({
+          model,
+          contents: `为“${name}”扩充视觉描述。原描述：“${currentDesc}”。覆盖材质、色彩、光影。只返回文字。`,
+          config: { thinkingConfig: { thinkingBudget: 512 } },
+        }),
+      );
+      return response.text || currentDesc;
+    },
   });
-  return response.text || currentDesc;
 }
 
 export async function generateAssetImage(
@@ -766,94 +898,113 @@ export async function generateAssetImage(
   config: GlobalConfig,
   signal?: AbortSignal,
 ): Promise<{ path: string; dataUri: string }> {
-  const ai = getClient();
-  const prompt = `${IMAGE_PRESET_PREFIX}\n[概念设计图]\n全局风格: ${config.artStyle}\n主体: ${name}\n细节: ${description}`;
+  return runWithProviderFallback({
+    capability: 'image',
+    preferredProvider: config.apiProvider,
+    taskName: 'generateAssetImage',
+    operation: async (ctx) => {
+      const ai = getClient(ctx);
+      const prompt = `${IMAGE_PRESET_PREFIX}\n[概念设计图]\n全局风格: ${config.artStyle}\n主体: ${name}\n细节: ${description}`;
 
-  const response = await ai.models.generateContent({
-    model: IMAGE_MODEL,
-    contents: prompt,
-    config: {
-      responseModalities: ['TEXT', 'IMAGE'],
-      imageConfig: { aspectRatio: '1:1', imageSize: '1K' as any },
-      abortSignal: signal,
+      const response = await runWithModelFallback(imageModelCandidates(ctx), (model) =>
+        ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            responseModalities: ['TEXT', 'IMAGE'],
+            imageConfig: { aspectRatio: '1:1', imageSize: '1K' as any },
+            abortSignal: signal,
+          },
+        }),
+      );
+
+      const candidate = response.candidates?.[0];
+      const inline = candidate?.content?.parts?.find((p: any) => p.inlineData)?.inlineData;
+      if (!inline?.data) throw new Error('Asset image generation returned no inline image data');
+
+      await fs.mkdir(path.join(ctx.outputDir, 'assets'), { recursive: true });
+      const safeName = name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 32);
+      const hash = crypto.createHash('sha1').update(inline.data).digest('hex').slice(0, 12);
+      const fileName = `asset_${safeName || 'item'}_${hash}.png`;
+      const filePath = path.join(ctx.outputDir, 'assets', fileName);
+      await fs.writeFile(filePath, Buffer.from(inline.data, 'base64'));
+
+      return { path: filePath, dataUri: `data:image/png;base64,${inline.data}` };
     },
   });
-
-  const candidate = response.candidates?.[0];
-  const inline = candidate?.content?.parts?.find((p: any) => p.inlineData)?.inlineData;
-  if (!inline?.data) throw new Error('Asset image generation returned no inline image data');
-
-  const { outputDir } = getAihubmixEnv();
-  await fs.mkdir(path.join(outputDir, 'assets'), { recursive: true });
-  const safeName = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 32);
-  const hash = crypto.createHash('sha1').update(inline.data).digest('hex').slice(0, 12);
-  const fileName = `asset_${safeName || 'item'}_${hash}.png`;
-  const filePath = path.join(outputDir, 'assets', fileName);
-  await fs.writeFile(filePath, Buffer.from(inline.data, 'base64'));
-
-  return { path: filePath, dataUri: `data:image/png;base64,${inline.data}` };
 }
 
 export async function discoverMissingAssets(shot: Shot, config: GlobalConfig): Promise<DiscoverMissingAssetsResult> {
-  const ai = getClient();
-  const currentAssetNames = {
-    characters: config.characters.map((c) => c.name),
-    scenes: config.scenes.map((s) => s.name),
-    props: config.props.map((p) => p.name),
-  };
+  return runWithProviderFallback({
+    capability: 'llm',
+    preferredProvider: config.apiProvider,
+    taskName: 'discoverMissingAssets',
+    operation: async (ctx) => {
+      const ai = getClient(ctx);
+      const currentAssetNames = {
+        characters: config.characters.map((c) => c.name),
+        scenes: config.scenes.map((s) => s.name),
+        props: config.props.map((p) => p.name),
+      };
 
-  const response = await ai.models.generateContent({
-    model: TEXT_MODEL,
-    contents: `分析分镜：${shot.visualTranslation}\n已有库：${JSON.stringify(
-      currentAssetNames,
-    )}\n提取库中缺失的实体并描述（角色/场景/道具）。`,
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          characters: {
-            type: Type.ARRAY,
-            items: {
+      const response = await runWithModelFallback(llmModelCandidates(ctx), (model) =>
+        ai.models.generateContent({
+          model,
+          contents: `分析分镜：${shot.visualTranslation}\n已有库：${JSON.stringify(
+            currentAssetNames,
+          )}\n提取库中缺失的实体并描述（角色/场景/道具）。`,
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
               type: Type.OBJECT,
-              properties: { name: { type: Type.STRING }, description: { type: Type.STRING } },
-              required: ['name', 'description'],
+              properties: {
+                characters: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: { name: { type: Type.STRING }, description: { type: Type.STRING } },
+                    required: ['name', 'description'],
+                  },
+                },
+                scenes: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: { name: { type: Type.STRING }, description: { type: Type.STRING } },
+                    required: ['name', 'description'],
+                  },
+                },
+                props: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: { name: { type: Type.STRING }, description: { type: Type.STRING } },
+                    required: ['name', 'description'],
+                  },
+                },
+              },
+              required: ['characters', 'scenes', 'props'],
             },
           },
-          scenes: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: { name: { type: Type.STRING }, description: { type: Type.STRING } },
-              required: ['name', 'description'],
-            },
-          },
-          props: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: { name: { type: Type.STRING }, description: { type: Type.STRING } },
-              required: ['name', 'description'],
-            },
-          },
-        },
-        required: ['characters', 'scenes', 'props'],
-      },
+        }),
+      );
+
+      const result = (safeJsonParse(response.text || '{}') as any) || {};
+      const normalize = (arr: any): MissingAssetCandidate[] =>
+        Array.isArray(arr)
+          ? arr.map((x) => ({ name: String(x?.name || ''), description: String(x?.description || '') }))
+          : [];
+
+      return {
+        characters: normalize(result.characters),
+        scenes: normalize(result.scenes),
+        props: normalize(result.props),
+      };
     },
   });
-
-  const result = (safeJsonParse(response.text || '{}') as any) || {};
-  const normalize = (arr: any): MissingAssetCandidate[] =>
-    Array.isArray(arr) ? arr.map((x) => ({ name: String(x?.name || ''), description: String(x?.description || '') })) : [];
-
-  return {
-    characters: normalize(result.characters),
-    scenes: normalize(result.scenes),
-    props: normalize(result.props),
-  };
 }

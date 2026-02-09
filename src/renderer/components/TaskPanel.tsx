@@ -11,9 +11,9 @@ const statusLabel: Record<TaskStatus, string> = {
 };
 
 const typeTone: Record<TaskType, string> = {
-  LLM: 'text-indigo-300',
-  IMAGE: 'text-amber-300',
-  VIDEO: 'text-emerald-300',
+  LLM: 'od-tone-primary',
+  IMAGE: 'od-tone-warning',
+  VIDEO: 'od-tone-success',
   EXPORT: 'text-slate-300',
 };
 
@@ -107,11 +107,11 @@ const TaskPanel: React.FC = () => {
   const renderStatusIcon = (status: TaskStatus) => {
     switch (status) {
       case 'running':
-        return <Loader2 size={12} className="text-indigo-400 animate-spin" />;
+        return <Loader2 size={12} className="od-tone-primary animate-spin" />;
       case 'completed':
-        return <CheckCircle2 size={12} className="text-emerald-400" />;
+        return <CheckCircle2 size={12} className="od-tone-success" />;
       case 'failed':
-        return <AlertCircle size={12} className="text-red-400" />;
+        return <AlertCircle size={12} className="od-tone-danger" />;
       case 'cancelled':
         return <XCircle size={12} className="text-slate-500" />;
       case 'queued':
@@ -173,7 +173,7 @@ const TaskPanel: React.FC = () => {
   };
 
   return (
-    <section className="mt-4 bg-slate-500/5 rounded-xl border border-white/10 p-4">
+    <section className="od-card mt-4 bg-slate-500/5 rounded-xl border border-white/10 p-4">
       {toasts.length > 0 && (
         <div className="fixed top-4 right-4 z-50 space-y-2" role="status" aria-live="polite">
           {toasts.map((toast) => (
@@ -181,8 +181,8 @@ const TaskPanel: React.FC = () => {
               key={toast.id}
               className={`rounded-lg border px-3 py-2 text-[10px] font-bold uppercase tracking-widest shadow-lg ${
                 toast.tone === 'success'
-                  ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-200'
-                  : 'border-red-400/40 bg-red-500/10 text-red-200'
+                  ? 'od-chip-success'
+                  : 'od-chip-danger'
               }`}
             >
               {toast.message}
@@ -200,7 +200,7 @@ const TaskPanel: React.FC = () => {
       </div>
 
       {!taskApiAvailable ? (
-        <div className="text-[10px] text-amber-300 py-2">
+        <div className="text-[10px] od-tone-warning py-2">
           浏览器预览模式下任务队列不可用，请在 Electron 桌面端运行。
         </div>
       ) : (
@@ -225,7 +225,7 @@ const TaskPanel: React.FC = () => {
             return (
               <div
                 key={task.id}
-                className="bg-[#10141a]/80 border border-white/5 rounded-lg px-3 py-2 text-[10px] text-slate-300 hover:border-white/10 transition-colors"
+                className="od-panel-soft rounded-lg px-3 py-2 text-[10px] text-slate-300 hover:border-white/10 transition-colors"
                 title={tooltip}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -241,7 +241,7 @@ const TaskPanel: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleCancel(task)}
-                        className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] uppercase text-slate-300 hover:text-white hover:border-white/20 hover:bg-white/10 transition-colors"
+                        className="od-btn-pill flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] uppercase transition-colors"
                         title="取消任务"
                       >
                         <StopCircle size={12} className="text-slate-400" />
@@ -252,7 +252,7 @@ const TaskPanel: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleRetry(task)}
-                        className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] uppercase text-slate-300 hover:text-white hover:border-white/20 hover:bg-white/10 transition-colors"
+                        className="od-btn-pill flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] uppercase transition-colors"
                         title="重试任务"
                       >
                         <RefreshCw size={12} className="text-slate-400" />
@@ -265,7 +265,7 @@ const TaskPanel: React.FC = () => {
                   <div className="mt-2">
                     <div className="h-1 rounded-full bg-white/5">
                       <div
-                        className="h-1 rounded-full bg-indigo-400 transition-all"
+                        className="h-1 rounded-full od-fill-primary transition-all"
                         style={{ width: `${Math.round(progress * 100)}%` }}
                       />
                     </div>

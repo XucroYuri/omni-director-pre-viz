@@ -4,6 +4,7 @@ import { initDatabase } from './db';
 import { registerIpcHandlers } from './ipc';
 import { loadLocalEnvFiles } from './loadEnv';
 import { registerMediaProtocol } from './services/mediaProtocol';
+import { loadRuntimeEnvOverrides } from './services/runtimeEnvService';
 
 function isBrokenPipeError(error: unknown): error is NodeJS.ErrnoException {
   return Boolean(error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'EPIPE');
@@ -98,7 +99,7 @@ function createDevOfflineHtml(lastError?: string) {
   return [
     '<!doctype html>',
     '<html lang="zh-CN">',
-    '<head><meta charset="UTF-8"><title>Omni Director - Dev Server Offline</title></head>',
+    '<head><meta charset="UTF-8"><title>HC Timeline - Dev Server Offline</title></head>',
     '<body style="margin:0;background:#0f1115;color:#cbd5e1;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;">',
     '<div style="height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;">',
     '<div style="max-width:700px;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:20px;background:rgba(255,255,255,.03)">',
@@ -229,6 +230,7 @@ if (!gotTheLock) {
   });
   app.whenReady().then(async () => {
     loadLocalEnvFiles();
+    loadRuntimeEnvOverrides();
     initDatabase();
     registerMediaProtocol();
     await createMainWindow();

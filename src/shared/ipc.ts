@@ -3,6 +3,7 @@ import type {
   ExportOptions,
   ExportResult,
   GlobalConfig,
+  RuntimeEnvConfig,
   ProjectSummary,
   EpisodeSummary,
   PromptOptimization,
@@ -27,6 +28,10 @@ export const IPC_CHANNELS = {
     db: {
       saveEpisode: 'app:db:saveEpisode',
       loadEpisode: 'app:db:loadEpisode',
+    },
+    settings: {
+      getRuntimeEnv: 'app:settings:getRuntimeEnv',
+      saveRuntimeEnv: 'app:settings:saveRuntimeEnv',
     },
     task: {
       submit: 'app:task:submit',
@@ -72,6 +77,10 @@ export type PreloadApi = {
     db: {
       saveEpisode: (data: EpisodeData) => Promise<void>;
       loadEpisode: (episodeId: string) => Promise<EpisodeData | null>;
+    };
+    settings: {
+      getRuntimeEnv: () => Promise<RuntimeEnvConfig>;
+      saveRuntimeEnv: (input: RuntimeEnvConfig) => Promise<RuntimeEnvConfig>;
     };
     task: {
       submit: (task: DBTask) => Promise<void>;

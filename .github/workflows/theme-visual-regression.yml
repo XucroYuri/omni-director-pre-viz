@@ -1,0 +1,51 @@
+name: Theme Visual Regression
+
+on:
+  pull_request:
+    paths:
+      - 'src/renderer/**'
+      - 'scripts/theme-visual-regression.cjs'
+      - 'docs/visual-baseline/theme/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/theme-visual-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  theme-visual-regression:
+    name: Theme Visual Regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer
+        run: npx vite build
+
+      - name: Run theme visual regression
+        run: xvfb-run -a npm run theme:visual:check:baseline
+
+      - name: Upload visual artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-visual-regression
+          path: temp_verification_out/theme-check
+          if-no-files-found: ignore

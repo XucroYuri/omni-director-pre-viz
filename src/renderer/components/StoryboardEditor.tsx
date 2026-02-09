@@ -10,7 +10,6 @@ import {
   Download,
   Film,
   History,
-  Layout,
   Loader2,
   Map as MapIcon,
   Maximize2,
@@ -23,7 +22,7 @@ import {
 import { discoverMissingAssets, generateMatrixPrompts } from '../services/geminiService';
 import { splitGridImageByCanvas } from '../utils/imageUtils';
 
-interface MatrixPromptEditorProps {
+interface StoryboardEditorProps {
   shot: Shot;
   allShots: Shot[];
   config: GlobalConfig;
@@ -58,34 +57,77 @@ const VIDEO_STATUS_TEXT: Record<ShotVideoStatus, string> = {
 
 const ACCENT_STYLES = {
   indigo: {
-    active: 'border-indigo-400 ring-4 ring-indigo-400/30 scale-110 z-10',
-    fallbackBg: 'bg-indigo-500/10',
-    fallbackText: 'text-indigo-400',
-    fallbackSubtext: 'text-indigo-500',
-    activeOverlay: 'bg-indigo-500/20',
-    activeBadge: 'bg-indigo-500',
+    active: 'od-asset-active-primary ring-4 scale-110 z-10',
+    fallbackBg: 'od-bg-primary-soft',
+    fallbackText: 'od-tone-primary',
+    fallbackSubtext: 'od-tone-primary',
+    activeOverlay: 'od-overlay-primary',
+    activeBadge: 'od-bg-primary',
   },
   amber: {
-    active: 'border-amber-400 ring-4 ring-amber-400/30 scale-110 z-10',
-    fallbackBg: 'bg-amber-500/10',
-    fallbackText: 'text-amber-400',
-    fallbackSubtext: 'text-amber-500',
-    activeOverlay: 'bg-amber-500/20',
-    activeBadge: 'bg-amber-500',
+    active: 'od-asset-active-warning ring-4 scale-110 z-10',
+    fallbackBg: 'od-bg-warning-soft',
+    fallbackText: 'od-tone-warning',
+    fallbackSubtext: 'od-tone-warning',
+    activeOverlay: 'od-overlay-warning',
+    activeBadge: 'od-bg-warning',
   },
   emerald: {
-    active: 'border-emerald-400 ring-4 ring-emerald-400/30 scale-110 z-10',
-    fallbackBg: 'bg-emerald-500/10',
-    fallbackText: 'text-emerald-400',
-    fallbackSubtext: 'text-emerald-500',
-    activeOverlay: 'bg-emerald-500/20',
-    activeBadge: 'bg-emerald-500',
+    active: 'od-asset-active-success ring-4 scale-110 z-10',
+    fallbackBg: 'od-bg-success-soft',
+    fallbackText: 'od-tone-success',
+    fallbackSubtext: 'od-tone-success',
+    activeOverlay: 'od-overlay-success',
+    activeBadge: 'od-bg-success',
   },
 } as const;
 
-const GRID_VALUES = [1, 2, 3, 4, 5] as const;
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
+const panelLabel = (index: number) => `Panel_${String(index + 1).padStart(2, '0')}`;
+const storyboardAnchorLabel = (index: number) => `[${panelLabel(index)}]`;
+const legacyAngleAnchorLabel = (index: number) => `[${getAngleLabel(index)}]`;
+
+const buildPromptDocument = (promptList: string[]) =>
+  promptList
+    .map((prompt, index) => `${storyboardAnchorLabel(index)}\n${prompt || ''}`.trimEnd())
+    .join('\n\n');
+
+const parsePromptDocument = (raw: string, count: number) => {
+  const source = raw.replace(/\r\n/g, '\n');
+  if (count <= 0) return [];
+
+  const labels = Array.from({ length: count }, (_item, index) => storyboardAnchorLabel(index));
+  const labelPattern = labels.map((label) => escapeRegExp(label)).join('|');
+  const legacyLabelPattern = Array.from({ length: count }, (_item, index) => escapeRegExp(legacyAngleAnchorLabel(index))).join('|');
+  const mergedLabelPattern = [labelPattern, legacyLabelPattern].filter(Boolean).join('|');
+  const blockRegex = new RegExp(`(?:^|\\n)(${mergedLabelPattern})\\s*\\n`, 'g');
+  const matches = Array.from(source.matchAll(blockRegex));
+  const labelToIndex = new Map<string, number>();
+  labels.forEach((label, index) => labelToIndex.set(label, index));
+  Array.from({ length: count }, (_item, index) => legacyAngleAnchorLabel(index)).forEach((label, index) =>
+    labelToIndex.set(label, index),
+  );
+  const next = Array.from({ length: count }, () => '');
+
+  if (matches.length === 0) {
+    next[0] = source.trim();
+    return next;
+  }
+
+  matches.forEach((match, order) => {
+    const label = match[1];
+    const index = labelToIndex.get(label);
+    if (index === undefined) return;
+    const start = (match.index ?? 0) + match[0].length;
+    const end = order + 1 < matches.length ? (matches[order + 1].index ?? source.length) : source.length;
+    next[index] = source.slice(start, end).replace(/\n+$/g, '');
+  });
+
+  return next;
+};
+
+const StoryboardEditor: React.FC<StoryboardEditorProps> = ({
   shot,
   config,
   episodeId,
@@ -116,13 +158,13 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
   const [showAnimaticPreview, setShowAnimaticPreview] = useState(false);
   const [isGeneratingAssetVideo, setIsGeneratingAssetVideo] = useState(false);
   const [showAssetVideoPreview, setShowAssetVideoPreview] = useState(false);
-  const [showRenderSettings, setShowRenderSettings] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
   const [activeHistoryIndex, setActiveHistoryIndex] = useState(0);
   const [discoveredAssets, setDiscoveredAssets] = useState<any[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [canvasSplitImages, setCanvasSplitImages] = useState<string[]>([]);
   const [isCanvasSlicing, setIsCanvasSlicing] = useState(false);
+  const [mergedPromptDraft, setMergedPromptDraft] = useState('');
 
   useEffect(() => {
     shotRef.current = shot;
@@ -150,6 +192,11 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     () => normalizeIndexedList<ShotVideoStatus>(shot.videoStatus, cellCount, 'idle'),
     [shot.videoStatus, cellCount],
   );
+
+  useEffect(() => {
+    const next = buildPromptDocument(prompts);
+    setMergedPromptDraft((current) => (current === next ? current : next));
+  }, [prompts]);
 
   const hasPersistedSlices = splitImages.some((item) => Boolean(item));
   const displaySplitImages = hasPersistedSlices
@@ -197,6 +244,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
     boundScenes.some((item) => item.refImage) ||
     boundProps.some((item) => item.refImage);
   const hasPromptContent = prompts.some((item) => item.trim().length > 0);
+  const hasFullPromptCoverage = prompts.every((item) => item.trim().length > 0);
   const hasSceneBinding = boundScenes.length > 0;
 
   const canRenderMatrix = hasSceneBinding && hasPromptContent && !isGeneratingImage;
@@ -207,23 +255,23 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
 
   const inlineHints = [
     !hasSceneBinding ? '未绑定场景：请在下方资产条至少绑定一个场景。' : '',
-    !hasPromptContent ? '当前提示词为空：先生成分镜提示词，或手动填写。' : '',
-    !shot.generatedImageUrl ? '尚未生成分镜网格图。' : '',
+    !hasPromptContent ? '当前 storyboard 面板脚本为空：先生成或手动填写。' : '',
+    !shot.generatedImageUrl ? '尚未生成 storyboard 板图。' : '',
     hasBoundAssets && !hasAssetRefs ? '资产已绑定但缺少参考图：建议补图后再生成资产视频。' : '',
   ].filter(Boolean);
 
   const renderDisabledReason = !hasSceneBinding
     ? '请先绑定至少一个场景。'
     : !hasPromptContent
-      ? '请先生成或填写提示词。'
+      ? '请先生成或填写 storyboard 面板脚本。'
       : isGeneratingImage
-        ? '分镜网格图生成中。'
+        ? 'Storyboard 板图生成中。'
         : '';
 
   const animaticDisabledReason = shot.animaticVideoUrl
     ? ''
     : !shot.generatedImageUrl
-      ? '请先生成分镜网格图。'
+      ? '请先生成 storyboard 板图。'
       : isGeneratingAnimatic
         ? '镜头预演正在生成。'
         : '';
@@ -239,6 +287,15 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
           : '';
 
   const historyItems = shot.history || [];
+  const storyboardReadiness = [
+    { key: 'scene-binding', label: '场景锚点', ready: hasSceneBinding },
+    { key: 'panel-script', label: '面板脚本', ready: hasPromptContent },
+    { key: 'panel-complete', label: '脚本覆盖', ready: hasFullPromptCoverage },
+    { key: 'asset-binding', label: '资产绑定', ready: hasBoundAssets },
+    { key: 'board-image', label: '板图产出', ready: Boolean(shot.generatedImageUrl) },
+    { key: 'previs', label: '预演产出', ready: Boolean(shot.animaticVideoUrl) || videoUrls.some(Boolean) },
+  ];
+  const readinessDoneCount = storyboardReadiness.filter((item) => item.ready).length;
 
   const assetRailSections: Array<{
     key: AssetCollectionKey;
@@ -254,7 +311,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
       label: '角色',
       accentColor: 'indigo',
       items: config.characters,
-      icon: <User size={12} className="text-indigo-400" />,
+      icon: <User size={12} className="od-tone-primary" />,
     },
     {
       key: 'sceneIds',
@@ -262,7 +319,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
       label: '场景',
       accentColor: 'amber',
       items: config.scenes,
-      icon: <MapIcon size={12} className="text-amber-400" />,
+      icon: <MapIcon size={12} className="od-tone-warning" />,
     },
     {
       key: 'propIds',
@@ -270,9 +327,33 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
       label: '道具',
       accentColor: 'emerald',
       items: config.props,
-      icon: <Box size={12} className="text-emerald-400" />,
+      icon: <Box size={12} className="od-tone-success" />,
     },
   ];
+
+  const boundAssetGroups = [
+    {
+      key: 'characters',
+      label: '角色',
+      icon: <User size={12} className="od-tone-primary" />,
+      toneClass: 'od-chip-primary',
+      items: boundCharacters,
+    },
+    {
+      key: 'scenes',
+      label: '场景',
+      icon: <MapIcon size={12} className="od-tone-warning" />,
+      toneClass: 'od-chip-warning',
+      items: boundScenes,
+    },
+    {
+      key: 'props',
+      label: '道具',
+      icon: <Box size={12} className="od-tone-success" />,
+      toneClass: 'od-chip-success',
+      items: boundProps,
+    },
+  ] as const;
 
   useEffect(() => {
     if (!window.api?.ai?.discoverMissingAssets) {
@@ -298,30 +379,13 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
       });
   }, [shot.id, shot.visualTranslation, config.characters, config.scenes, config.props]);
 
-  const handlePromptChange = (index: number, value: string) => {
-    const next = [...prompts];
-    next[index] = value;
-    onUpdatePrompts(next);
+  const handleMergedPromptChange = (value: string) => {
+    setMergedPromptDraft(value);
+    const parsed = ensurePromptListLength(parsePromptDocument(value, cellCount), gridLayout);
+    onUpdatePrompts(parsed);
   };
 
-  const handleGridLayoutChange = (field: 'rows' | 'cols', value: number) => {
-    const nextLayout = normalizeGridLayout({ ...gridLayout, [field]: value });
-    const nextCellCount = getGridCellCount(nextLayout);
-    const nextPrompts = ensurePromptListLength(prompts, nextLayout);
-
-    setCanvasSplitImages([]);
-    onUpdateShot({
-      gridLayout: nextLayout,
-      matrixPrompts: nextPrompts,
-      generatedImageUrl: undefined,
-      splitImages: [],
-      videoUrls: Array(nextCellCount).fill(null),
-      videoStatus: Array(nextCellCount).fill('idle'),
-      animaticVideoUrl: undefined,
-    });
-  };
-
-  const handleInitializeShot = async () => {
+  const handleInitializeStoryboard = async () => {
     setIsPromptingAll(true);
     try {
       const current = ensurePromptListLength(shot.matrixPrompts, gridLayout);
@@ -471,7 +535,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
       if (!img) return;
       const anchor = document.createElement('a');
       anchor.href = img;
-      anchor.download = `S_${shot.id.substring(0, 4)}_${getAngleLabel(index)}.png`;
+      anchor.download = `S_${shot.id.substring(0, 4)}_${panelLabel(index)}.png`;
       anchor.click();
     });
   };
@@ -535,38 +599,48 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
   };
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-[#0f1115]">
+    <div className="od-workspace h-full flex flex-col overflow-hidden bg-[#0f1115]">
       <div className="border-b border-white/10 bg-[#16191f]/80 px-4 py-3 sm:px-6 shrink-0 backdrop-blur-md z-20 flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex flex-1 items-center gap-3 sm:gap-5">
+        <div className="min-w-0 flex flex-1 flex-wrap items-start gap-3 sm:gap-5">
           <div className="flex shrink-0 flex-col">
             <span className="text-[9px] font-black text-slate-500 tracking-widest">当前镜头</span>
-            <span className="text-[12px] font-mono font-black text-indigo-400">SH_{shot.id.substring(0, 4)}</span>
+            <span className="text-[12px] font-mono font-black od-tone-primary">SH_{shot.id.substring(0, 4)}</span>
           </div>
           <div className="h-6 w-px bg-white/10 shrink-0" />
-          <div className="min-w-0 flex flex-col">
+          <div className="min-w-0 flex flex-1 flex-col">
             <span className="text-[9px] font-black text-slate-500 tracking-widest">视觉拆解</span>
-            <span className="text-[12px] text-slate-100 font-medium italic truncate max-w-full sm:max-w-[420px]">"{shot.visualTranslation}"</span>
+            <span className="text-[12px] text-slate-100 font-medium italic truncate max-w-full sm:max-w-[420px]">
+              "{shot.visualTranslation}"
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-white/10 bg-black/25 px-2.5 py-1.5">
+            {boundAssetGroups.map((group) => {
+              const names = group.items.map((item) => item.name).join('、') || '未绑定';
+              return (
+                <div
+                  key={group.key}
+                  className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[9px] font-black tracking-wide ${group.toneClass}`}
+                  title={`${group.label}: ${names}`}
+                >
+                  {group.icon}
+                  <span>{group.label}</span>
+                  <span className="rounded bg-black/30 px-1 py-0.5 text-[8px]">{group.items.length}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setShowRenderSettings((prev) => !prev)}
-            className="h-9 w-9 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg transition-all flex items-center justify-center"
-            title={showRenderSettings ? '收起网格布局' : '展开网格布局'}
-            aria-label={showRenderSettings ? '收起网格布局' : '展开网格布局'}
-          >
-            <Layout size={14} />
-          </button>
-
-          <button
-            onClick={() => setShowHistory((prev) => !prev)}
-            className={`h-9 px-3 rounded-lg border text-[10px] font-black tracking-widest transition-all flex items-center gap-2 ${
-              showHistory
-                ? 'bg-indigo-500/20 border-indigo-400/40 text-indigo-200'
-                : 'bg-white/5 border-white/10 text-slate-300 hover:text-white'
-            }`}
-            title="切换历史版本面板"
+            <button
+              onClick={() => setShowHistory((prev) => !prev)}
+              className={`h-9 px-3 rounded-lg border text-[10px] font-black tracking-widest transition-all flex items-center gap-2 ${
+                showHistory
+                  ? 'od-chip-primary'
+                  : 'od-btn-ghost'
+              }`}
+              title="切换历史版本面板"
           >
             <History size={14} />
             历史
@@ -575,17 +649,17 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
           <button
             onClick={applyPromptOptimization}
             disabled={isOptimizing}
-            className="h-9 px-3 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
-            title="优化当前镜头提示词"
+            className="od-btn-ghost h-9 px-3 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2"
+            title="优化当前 storyboard 面板脚本"
           >
             {isOptimizing ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
-            优化
+            优化脚本
           </button>
 
           <button
             onClick={applyAutoLink}
             disabled={isAutoLinking}
-            className="h-9 px-3 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+            className="od-btn-ghost h-9 px-3 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2"
             title="根据文本自动关联资产"
           >
             {isAutoLinking ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
@@ -601,7 +675,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
               }
             }}
             disabled={!canGenerateAnimatic}
-            className="h-9 px-4 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+            className="od-btn-ghost h-9 px-4 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2"
             title={animaticDisabledReason || '生成或查看镜头预演'}
           >
             {isGeneratingAnimatic ? <Loader2 size={14} className="animate-spin" /> : <Film size={14} />}
@@ -617,7 +691,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
               }
             }}
             disabled={!canGenerateAssetVideo}
-            className="h-9 px-4 bg-white/5 border border-white/10 text-slate-300 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+            className="od-btn-ghost h-9 px-4 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2"
             title={assetVideoDisabledReason || '生成或查看资产视频'}
           >
             {isGeneratingAssetVideo ? <Loader2 size={14} className="animate-spin" /> : <Video size={14} />}
@@ -627,31 +701,31 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
           <button
             onClick={handleBatchDownload}
             disabled={!canDownloadAll}
-            className="h-9 px-4 bg-white/5 border border-white/10 text-slate-400 hover:text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 disabled:opacity-40"
+            className="od-btn-ghost h-9 px-4 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2"
             title={!canDownloadAll ? '暂无可下载图像' : '下载当前网格切片'}
           >
             <Download size={14} /> 下载
           </button>
 
           <button
-            onClick={handleInitializeShot}
+            onClick={handleInitializeStoryboard}
             disabled={isPromptingAll || isGeneratingPrompts}
-            className={`h-9 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 shadow-lg ${
+            className={`od-btn-primary h-9 px-4 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center gap-2 shadow-lg ${
               isPromptingAll || isGeneratingPrompts ? 'animate-pulse' : ''
             }`}
           >
             {isPromptingAll || isGeneratingPrompts ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-            分镜提示词
+            Storyboard 脚本
           </button>
 
           <button
             onClick={onGenerateImage}
             disabled={!canRenderMatrix}
-            className="px-6 h-9 bg-slate-100 text-black hover:bg-indigo-500 hover:text-white disabled:opacity-20 rounded-lg text-[11px] font-black tracking-widest transition-all flex items-center gap-2 shadow-xl"
+            className="od-btn-primary px-6 h-9 disabled:opacity-20 rounded-lg text-[11px] font-black tracking-widest transition-all flex items-center gap-2 shadow-xl"
             title={renderDisabledReason}
           >
             {isGeneratingImage ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-            分镜网格图
+            Storyboard 板图
           </button>
         </div>
       </div>
@@ -659,7 +733,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
       {showHistory && (
         <div className="border-b border-white/10 bg-[#121722] px-4 sm:px-6 py-3">
           {historyItems.length === 0 ? (
-            <div className="text-[10px] text-slate-500">暂无历史版本。</div>
+            <div className="text-[10px] text-slate-500">暂无 storyboard 历史版本。</div>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               {historyItems.map((item, index) => {
@@ -671,8 +745,8 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                     onClick={() => setActiveHistoryIndex(index)}
                     className={`px-3 py-1.5 rounded-lg border text-[10px] transition-all ${
                       active
-                        ? 'bg-indigo-500/20 border-indigo-400/40 text-indigo-100'
-                        : 'bg-white/5 border-white/10 text-slate-300 hover:text-white'
+                        ? 'od-pill-primary'
+                        : 'od-btn-ghost'
                     }`}
                   >
                     <span className="font-black">V{historyItems.length - index}</span>
@@ -685,60 +759,22 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
               })}
               <button
                 onClick={() => onRestoreHistory(activeHistoryIndex)}
-                className="h-8 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black tracking-widest"
+                className="od-btn-primary h-8 px-3 rounded-lg text-[10px] font-black tracking-widest"
               >
-                恢复此版本
+                恢复此 storyboard 版本
               </button>
             </div>
           )}
         </div>
       )}
 
-      {showRenderSettings && (
-        <div className="border-b border-white/10 bg-[#121722] px-4 sm:px-6 py-3 shrink-0">
-          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-3 flex flex-wrap items-center gap-3">
-            <span className="text-[10px] font-black tracking-widest text-slate-400">网格布局</span>
-            <div className="flex items-center gap-2 ml-auto">
-              <span className="text-[10px] text-slate-500">行</span>
-              <select
-                value={gridLayout.rows}
-                onChange={(event) => handleGridLayoutChange('rows', Number(event.target.value))}
-                className="h-8 rounded-md border border-white/10 bg-black/40 px-2 text-[10px] font-black text-slate-200 outline-none focus:border-indigo-500/40"
-              >
-                {GRID_VALUES.map((value) => (
-                  <option key={`row-${value}`} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-              <span className="text-[10px] font-black text-slate-500">x</span>
-              <span className="text-[10px] text-slate-500">列</span>
-              <select
-                value={gridLayout.cols}
-                onChange={(event) => handleGridLayoutChange('cols', Number(event.target.value))}
-                className="h-8 rounded-md border border-white/10 bg-black/40 px-2 text-[10px] font-black text-slate-200 outline-none focus:border-indigo-500/40"
-              >
-                {GRID_VALUES.map((value) => (
-                  <option key={`col-${value}`} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <span className="text-[10px] text-slate-500">
-              当前 {gridLayout.rows}x{gridLayout.cols} / 共 {cellCount} 格
-            </span>
-          </div>
-        </div>
-      )}
-
       {inlineHints.length > 0 && (
-        <div className="border-b border-white/10 bg-amber-500/10 px-4 sm:px-6 py-2 flex flex-wrap items-center gap-2 shrink-0">
-          <span className="text-[9px] font-black uppercase tracking-widest text-amber-300">提示</span>
+        <div className="border-b border-white/10 od-bg-warning-soft px-4 sm:px-6 py-2 flex flex-wrap items-center gap-2 shrink-0">
+          <span className="text-[9px] font-black uppercase tracking-widest od-tone-warning">提示</span>
           {inlineHints.map((hint) => (
             <span
               key={hint}
-              className="text-[9px] font-medium text-amber-200 bg-black/30 border border-amber-300/20 rounded-full px-2 py-0.5"
+              className="text-[9px] font-medium rounded-full px-2 py-0.5 od-chip-warning"
             >
               {hint}
             </span>
@@ -746,9 +782,29 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
         </div>
       )}
 
+      <div className="border-b border-white/10 bg-slate-500/5 px-4 sm:px-6 py-2.5 flex flex-wrap items-center gap-2 shrink-0">
+        <span className="text-[9px] font-black uppercase tracking-widest od-tone-primary">Storyboard 闭环</span>
+        <span className="text-[9px] text-slate-500">
+          {readinessDoneCount}/{storyboardReadiness.length}
+        </span>
+        {storyboardReadiness.map((item) => (
+          <span
+            key={item.key}
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] ${
+              item.ready
+                ? 'od-chip-success'
+                : 'border-white/10 bg-white/5 text-slate-400'
+            }`}
+          >
+            {item.ready ? <Check size={10} /> : <X size={10} />}
+            {item.label}
+          </span>
+        ))}
+      </div>
+
       {discoveredAssets.length > 0 && (
-        <div className="h-12 bg-amber-500/10 border-b border-amber-500/20 flex items-center px-4 sm:px-6 gap-4 shrink-0 z-10 overflow-hidden">
-          <div className="flex items-center gap-2 text-amber-500 shrink-0">
+        <div className="h-12 od-bg-warning-soft border-b border-white/10 flex items-center px-4 sm:px-6 gap-4 shrink-0 z-10 overflow-hidden">
+          <div className="flex items-center gap-2 od-tone-warning shrink-0">
             <Sparkles size={14} className="animate-pulse" />
             <span className="text-[9px] font-black uppercase">提案发现</span>
           </div>
@@ -757,7 +813,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
               <div
                 key={`${asset.name}-${index}`}
                 onClick={() => onAddGlobalAsset(asset.type, asset.name, asset.description)}
-                className="flex items-center gap-2 bg-black/40 border border-white/5 rounded-full px-3 py-0.5 cursor-pointer hover:border-amber-500/50 transition-all shrink-0"
+                className="flex items-center gap-2 rounded-full px-3 py-0.5 cursor-pointer transition-all shrink-0 od-pill-warning"
               >
                 <span className="text-[8px] font-bold text-slate-200">{asset.name}</span>
               </div>
@@ -828,19 +884,19 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
           <section className="min-h-0 rounded-xl border border-white/10 bg-[#131722] overflow-hidden flex flex-col">
             <div className="h-11 px-4 border-b border-white/10 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black tracking-widest text-slate-300">分镜网格</span>
+                <span className="text-[10px] font-black tracking-widest text-slate-300">Storyboard 面板</span>
                 <span className="text-[10px] text-slate-500">{gridLayout.rows}x{gridLayout.cols}</span>
               </div>
               <div className="flex items-center gap-2 text-[10px] text-slate-500">
                 {isCanvasSlicing && (
-                  <span className="inline-flex items-center gap-1 text-indigo-300">
+                  <span className="inline-flex items-center gap-1 od-tone-primary">
                     <Loader2 size={12} className="animate-spin" /> Canvas 切片中
                   </span>
                 )}
                 <button
                   onClick={() => setActivePreviewIndex(0)}
                   disabled={!shot.generatedImageUrl && !displaySplitImages.some(Boolean)}
-                  className="h-7 px-2 rounded bg-white/5 hover:bg-white/10 text-slate-300 disabled:opacity-30"
+                  className="od-btn-ghost h-7 px-2 rounded text-slate-300"
                   title="打开大图预览"
                 >
                   <Maximize2 size={12} />
@@ -852,7 +908,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
               {displaySplitImages.some(Boolean) ? (
                 <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${gridLayout.cols}, minmax(0, 1fr))` }}>
                   {Array.from({ length: cellCount }, (_item, index) => {
-                    const label = getAngleLabel(index);
+                    const label = panelLabel(index);
                     const status = videoStatus[index];
                     const image = displaySplitImages[index];
                     const video = videoUrls[index];
@@ -875,8 +931,8 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                         </div>
                         {(status === 'queued' || status === 'processing' || status === 'downloading') && (
                           <div className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center gap-1">
-                            <Loader2 size={16} className="animate-spin text-indigo-300" />
-                            <span className="text-[9px] text-indigo-200">{VIDEO_STATUS_TEXT[status]}</span>
+                            <Loader2 size={16} className="animate-spin od-tone-primary" />
+                            <span className="text-[9px] od-tone-primary">{VIDEO_STATUS_TEXT[status]}</span>
                           </div>
                         )}
                         {status === 'failed' && (
@@ -896,69 +952,80 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
               ) : (
                 <div className="h-full rounded-lg border border-dashed border-white/10 bg-black/20 flex flex-col items-center justify-center gap-2 text-slate-500 text-[11px]">
                   <Clock3 size={18} />
-                  <span>尚未生成分镜网格图</span>
+                  <span>尚未生成 storyboard 板图</span>
                 </div>
               )}
             </div>
           </section>
 
           <section className="min-h-0 rounded-xl border border-white/10 bg-[#131722] overflow-hidden flex flex-col">
-            <div className="h-11 px-4 border-b border-white/10 flex items-center justify-between">
+            <div className="h-11 px-4 border-b border-white/10 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black tracking-widest text-slate-300">分镜提示词列表</span>
-                <span className="text-[10px] text-slate-500">{cellCount} 条</span>
+                <span className="text-[10px] font-black tracking-widest text-slate-300">Storyboard 面板脚本</span>
+                <span className="text-[10px] text-slate-500">{cellCount} panel</span>
               </div>
+              <button
+                type="button"
+                onClick={() => setMergedPromptDraft(buildPromptDocument(prompts))}
+                className="od-btn-ghost h-7 px-2 rounded-md text-[9px] font-black tracking-widest"
+                title="按 Panel 锚点格式重排文本"
+              >
+                重排 Panel 锚点
+              </button>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-3 py-3 space-y-2">
-              {prompts.map((prompt, index) => {
-                const label = getAngleLabel(index);
-                const status = videoStatus[index];
-                const statusText = VIDEO_STATUS_TEXT[status];
-                const canOpenVideoModal = Boolean(splitImages[index]);
-                const isVideoBusy = status === 'queued' || status === 'processing' || status === 'downloading';
-                return (
-                  <div key={label} className="rounded-lg border border-white/10 bg-black/30 px-3 py-2">
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-[10px] font-black text-indigo-300 shrink-0">{label}</span>
-                        <span
-                          className={`text-[9px] px-1.5 py-0.5 rounded border ${
-                            status === 'completed'
-                              ? 'border-emerald-400/30 bg-emerald-500/15 text-emerald-200'
-                              : status === 'failed'
-                                ? 'border-rose-400/30 bg-rose-500/15 text-rose-200'
-                                : 'border-white/10 bg-white/5 text-slate-400'
-                          }`}
-                        >
-                          {statusText}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => openVideoModal(index)}
-                        disabled={!canOpenVideoModal || isVideoBusy}
-                        className="h-7 px-2 rounded bg-white/5 hover:bg-white/10 text-slate-300 disabled:opacity-30 text-[10px] flex items-center gap-1"
-                        title={
-                          !canOpenVideoModal
-                            ? '请先生成并保存网格切片后再生成机位视频'
-                            : isVideoBusy
-                              ? `当前状态：${statusText}`
-                              : '生成该机位视频'
-                        }
-                      >
-                        {isVideoBusy ? <Loader2 size={12} className="animate-spin" /> : <Video size={12} />}
-                        机位视频
-                      </button>
-                    </div>
-                    <textarea
-                      className="w-full h-20 bg-black/30 border border-white/10 rounded-md px-2 py-1.5 text-[11px] text-slate-100 outline-none resize-y min-h-[72px] focus:border-indigo-500/40"
-                      value={prompt}
-                      onChange={(event) => handlePromptChange(index, event.target.value)}
-                      placeholder="输入该格提示词..."
-                    />
-                  </div>
-                );
-              })}
+            <div className="px-3 py-2 border-b border-white/10 bg-black/20">
+              <div className="flex flex-wrap gap-1.5">
+                {Array.from({ length: cellCount }, (_item, index) => {
+                  const label = panelLabel(index);
+                  const status = videoStatus[index];
+                  const statusText = VIDEO_STATUS_TEXT[status];
+                  const canOpenVideoModal = Boolean(splitImages[index]);
+                  const isVideoBusy = status === 'queued' || status === 'processing' || status === 'downloading';
+                  const statusClass =
+                    status === 'completed'
+                      ? 'od-chip-success'
+                      : status === 'failed'
+                        ? 'border-rose-400/30 bg-rose-500/15 text-rose-100'
+                        : 'border-white/10 bg-white/5 text-slate-300';
+
+                  return (
+                    <button
+                      key={label}
+                      onClick={() => openVideoModal(index)}
+                      disabled={!canOpenVideoModal || isVideoBusy}
+                      className={`h-7 rounded-md border px-2 text-[9px] font-black tracking-wide inline-flex items-center gap-1.5 disabled:opacity-35 ${statusClass}`}
+                      title={
+                        !canOpenVideoModal
+                          ? '请先生成并保存网格切片后再生成机位视频'
+                          : isVideoBusy
+                            ? `当前状态：${statusText}`
+                            : `${label} 机位视频`
+                      }
+                    >
+                      {isVideoBusy ? <Loader2 size={10} className="animate-spin" /> : <Video size={10} />}
+                      <span>{label}</span>
+                      <span className="text-[8px] opacity-90">{statusText}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-[9px] text-slate-500 leading-relaxed">
+                使用锚点连续编辑全部 panel 脚本，格式：<span className="text-slate-300 font-mono">[Panel_01]</span> + 对应内容。
+              </p>
+            </div>
+
+            <div className="flex-1 min-h-0 p-3">
+              <textarea
+                className="od-input h-full w-full resize-none rounded-lg px-3 py-3 text-[11px] leading-relaxed outline-none font-mono custom-scrollbar"
+                value={mergedPromptDraft}
+                onChange={(event) => handleMergedPromptChange(event.target.value)}
+                placeholder="[Panel_01]
+输入第 1 格提示词...
+
+[Panel_02]
+输入第 2 格提示词..."
+              />
             </div>
           </section>
         </div>
@@ -985,7 +1052,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             </div>
             <div className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3">
               <div className="flex items-center gap-2 mb-2">
-                <span className="px-2 py-0.5 rounded bg-indigo-500 text-white text-[10px] font-black">{getAngleLabel(activePreviewIndex)}</span>
+                <span className="px-2 py-0.5 rounded od-bg-primary text-white text-[10px] font-black">{panelLabel(activePreviewIndex)}</span>
                 <span className="text-[10px] text-slate-500">镜头：{shot.id}</span>
               </div>
               <p className="text-[12px] text-slate-200 leading-relaxed">{prompts[activePreviewIndex]}</p>
@@ -1029,7 +1096,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
           <div className="w-full max-w-4xl bg-[#141821] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
               <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-lg bg-indigo-500/20 text-indigo-300 flex items-center justify-center">
+                <div className="h-9 w-9 rounded-lg od-bg-primary-soft od-tone-primary flex items-center justify-center">
                   <Film size={18} />
                 </div>
                 <div>
@@ -1037,7 +1104,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                   <div className="text-[10px] text-slate-500">确认后开始调用 Sora-2</div>
                 </div>
               </div>
-              <button onClick={() => setVideoModalIndex(null)} className="p-2 rounded-full bg-white/5 hover:bg-white/10 transition-all">
+              <button onClick={() => setVideoModalIndex(null)} className="od-btn-ghost p-2 rounded-full transition-all">
                 <X size={16} className="text-slate-300" />
               </button>
             </div>
@@ -1045,7 +1112,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 px-6 py-5">
               <div className="space-y-4">
                 <div className="text-[10px] font-black tracking-widest text-slate-400">参考帧</div>
-                <div className="aspect-video bg-black/40 border border-white/10 rounded-xl overflow-hidden">
+                <div className="od-panel-soft aspect-video rounded-xl overflow-hidden">
                   {splitImages[videoModalIndex] ? (
                     <img src={splitImages[videoModalIndex]} className="w-full h-full object-cover" />
                   ) : (
@@ -1054,7 +1121,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
                   <span>镜头: SH_{shot.id.substring(0, 4)}</span>
-                  <span>{getAngleLabel(videoModalIndex)}</span>
+                  <span>{panelLabel(videoModalIndex)}</span>
                 </div>
               </div>
 
@@ -1066,7 +1133,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                       setVideoPromptDraft(prompts[videoModalIndex] || shot.visualTranslation);
                       setSyncVideoPrompt(true);
                     }}
-                    className="text-[10px] font-black text-indigo-300 hover:text-indigo-200"
+                    className="text-[10px] font-black od-tone-primary hover:text-slate-100"
                   >
                     使用当前机位提示词
                   </button>
@@ -1074,7 +1141,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                 <textarea
                   value={videoPromptDraft}
                   onChange={(event) => setVideoPromptDraft(event.target.value)}
-                  className="w-full h-40 bg-black/40 border border-white/10 rounded-xl p-3 text-[11px] text-slate-200 outline-none resize-none focus:border-indigo-500/50 focus:bg-white/5"
+                  className="od-input w-full h-40 rounded-xl p-3 text-[11px] outline-none resize-none"
                   placeholder="为视频补充动作/镜头描述..."
                 />
                 <label className="flex items-center gap-2 text-[10px] text-slate-400">
@@ -1082,7 +1149,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                     type="checkbox"
                     checked={syncVideoPrompt}
                     onChange={(event) => setSyncVideoPrompt(event.target.checked)}
-                    className="accent-indigo-500"
+                    className="od-accent-primary"
                   />
                   同步更新该机位提示词
                 </label>
@@ -1092,7 +1159,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
             <div className="flex items-center justify-between px-6 py-4 border-t border-white/10 bg-[#10131a]">
               <div className="text-[10px] text-slate-500">状态流转：排队 → 处理中 → 下载中 → 完成</div>
               <div className="flex items-center gap-3">
-                <button onClick={() => setVideoModalIndex(null)} className="h-9 px-4 rounded-lg bg-white/5 text-slate-300 hover:bg-white/10 text-[10px] font-black tracking-widest">
+                <button onClick={() => setVideoModalIndex(null)} className="od-btn-ghost h-9 px-4 rounded-lg text-[10px] font-black tracking-widest">
                   取消
                 </button>
                 <button
@@ -1107,7 +1174,7 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
                     setVideoModalIndex(null);
                   }}
                   disabled={!splitImages[videoModalIndex]}
-                  className="h-9 px-5 rounded-lg bg-indigo-500 text-white hover:bg-indigo-400 text-[10px] font-black tracking-widest shadow-lg disabled:opacity-40"
+                  className="od-btn-primary h-9 px-5 rounded-lg text-[10px] font-black tracking-widest shadow-lg"
                 >
                   开始生成
                 </button>
@@ -1120,4 +1187,4 @@ const MatrixPromptEditor: React.FC<MatrixPromptEditorProps> = ({
   );
 };
 
-export default MatrixPromptEditor;
+export default StoryboardEditor;

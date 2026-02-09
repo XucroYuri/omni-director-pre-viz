@@ -22,6 +22,10 @@ const api: PreloadApi = {
       saveEpisode: (data) => ipcRenderer.invoke(IPC_CHANNELS.app.db.saveEpisode, data),
       loadEpisode: (episodeId) => ipcRenderer.invoke(IPC_CHANNELS.app.db.loadEpisode, episodeId),
     },
+    settings: {
+      getRuntimeEnv: () => ipcRenderer.invoke(IPC_CHANNELS.app.settings.getRuntimeEnv),
+      saveRuntimeEnv: (input) => ipcRenderer.invoke(IPC_CHANNELS.app.settings.saveRuntimeEnv, input),
+    },
     task: {
       submit: (task) => ipcRenderer.invoke(IPC_CHANNELS.app.task.submit, task),
       list: () => ipcRenderer.invoke(IPC_CHANNELS.app.task.list),

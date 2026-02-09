@@ -39,5 +39,7 @@ export const limiters = {
   llm: createLimiter(10),
   image: createLimiter(5),
   video: createLimiter(3),
+  tts: createLimiter(4),
+  music: createLimiter(2),
+  sfx: createLimiter(4),
 };
-

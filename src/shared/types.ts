@@ -166,7 +166,27 @@ export interface ExportResult {
   error?: string;
 }
 
-export type ApiProvider = 'aihubmix';
+export type ApiProvider = 'auto' | 'aihubmix' | 'gemini' | 'volcengine';
+export type ProviderId = Exclude<ApiProvider, 'auto'>;
+export type AICapability = 'llm' | 'image' | 'video' | 'tts' | 'music' | 'sfx';
+
+export interface ProviderModelMap {
+  llm: string[];
+  image: string[];
+  video: string[];
+  tts: string[];
+  music: string[];
+  sfx: string[];
+}
+
+export interface ProviderRuntimeConfig {
+  enabled: boolean;
+  priority: number;
+  apiKeys: string[];
+  geminiBaseUrl?: string;
+  openaiBaseUrl?: string;
+  models: ProviderModelMap;
+}
 
 export interface GlobalConfig {
   artStyle: string;
@@ -176,6 +196,15 @@ export interface GlobalConfig {
   scenes: Scene[];
   props: Prop[];
   apiProvider: ApiProvider;
+}
+
+export interface RuntimeEnvConfig {
+  apiProvider: ApiProvider;
+  providers: {
+    aihubmix: ProviderRuntimeConfig;
+    gemini: ProviderRuntimeConfig;
+    volcengine: ProviderRuntimeConfig;
+  };
 }
 
 export interface ScriptBreakdownResponse {

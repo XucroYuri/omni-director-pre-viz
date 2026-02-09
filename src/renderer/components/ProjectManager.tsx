@@ -57,28 +57,28 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
   };
 
   return (
-    <div className="h-full p-4 sm:p-6 bg-[#0d0f13] overflow-auto">
+    <div className="od-page h-full p-4 sm:p-6 bg-[#0d0f13] overflow-auto">
       <div className="mx-auto w-full max-w-7xl space-y-4">
-        <header className="rounded-2xl border border-white/10 bg-[#16191f] p-5 sm:p-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <header className="od-card rounded-2xl border border-white/10 bg-[#16191f] p-5 sm:p-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-indigo-300 font-black">Project</div>
+            <div className="text-[10px] uppercase tracking-[0.18em] od-tone-primary font-black">Project</div>
             <h2 className="mt-1 text-xl sm:text-2xl font-black text-white">项目与单集管理</h2>
             <p className="mt-2 text-[12px] text-slate-400 max-w-3xl">
               项目（Project）下管理多集（Episode），点击单集可进入当前分镜创作工作区。
             </p>
           </div>
           {!isElectronRuntime && (
-            <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+            <div className="od-alert-warning rounded-lg px-3 py-2 text-[11px]">
               浏览器预览模式仅展示界面；项目与单集数据写入需在 Electron 桌面端执行。
             </div>
           )}
         </header>
 
         <div className="grid grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)] gap-4">
-          <aside className="rounded-2xl border border-white/10 bg-[#16191f] min-h-[620px] flex flex-col">
+          <aside className="od-card rounded-2xl border border-white/10 bg-[#16191f] min-h-[620px] flex flex-col">
             <div className="px-4 py-4 border-b border-white/10 flex items-center justify-between">
               <span className="text-[10px] font-black tracking-widest text-slate-300 uppercase">项目列表</span>
-              <FolderKanban size={14} className="text-indigo-300" />
+              <FolderKanban size={14} className="od-tone-primary" />
             </div>
 
             <div className="px-4 py-3 border-b border-white/10 space-y-2">
@@ -86,18 +86,18 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
                 value={projectName}
                 onChange={(event) => setProjectName(event.target.value)}
                 placeholder="新项目名称"
-                className="w-full h-9 rounded-lg bg-black/30 border border-white/10 px-3 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40"
+                className="od-input w-full h-9 rounded-lg px-3 text-[11px] outline-none"
               />
               <input
                 value={projectDesc}
                 onChange={(event) => setProjectDesc(event.target.value)}
                 placeholder="项目说明（可选）"
-                className="w-full h-9 rounded-lg bg-black/30 border border-white/10 px-3 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40"
+                className="od-input w-full h-9 rounded-lg px-3 text-[11px] outline-none"
               />
               <button
                 onClick={handleCreateProject}
                 disabled={!isElectronRuntime || isCreatingProject || !projectName.trim()}
-                className="w-full h-9 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black tracking-widest disabled:opacity-40 flex items-center justify-center gap-2"
+                className="od-btn-primary w-full h-9 rounded-lg text-[10px] font-black tracking-widest flex items-center justify-center gap-2"
               >
                 {isCreatingProject ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
                 新建项目
@@ -118,7 +118,7 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
                       onClick={() => onSelectProject(project.projectId)}
                       className={`w-full text-left rounded-xl border p-3 transition-all ${
                         active
-                          ? 'border-indigo-400/40 bg-indigo-500/15'
+                          ? 'od-chip-primary'
                           : 'border-white/10 bg-black/20 hover:border-white/20'
                       }`}
                     >
@@ -134,13 +134,13 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
             </div>
           </aside>
 
-          <section className="rounded-2xl border border-white/10 bg-[#16191f] min-h-[620px] flex flex-col">
+          <section className="od-card rounded-2xl border border-white/10 bg-[#16191f] min-h-[620px] flex flex-col">
             <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
               <div>
                 <div className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Episode</div>
                 <div className="text-[14px] text-white font-black">{selectedProject?.name || '未选择项目'}</div>
               </div>
-              <Sparkles size={14} className="text-indigo-300" />
+              <Sparkles size={14} className="od-tone-primary" />
             </div>
 
             <div className="px-5 py-3 border-b border-white/10 flex flex-wrap gap-2">
@@ -148,12 +148,12 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
                 value={episodeTitle}
                 onChange={(event) => setEpisodeTitle(event.target.value)}
                 placeholder="新单集标题（可选）"
-                className="flex-1 min-w-[220px] h-9 rounded-lg bg-black/30 border border-white/10 px-3 text-[11px] text-slate-200 outline-none focus:border-indigo-500/40"
+                className="od-input flex-1 min-w-[220px] h-9 rounded-lg px-3 text-[11px] outline-none"
               />
               <button
                 onClick={handleCreateEpisode}
                 disabled={!isElectronRuntime || !selectedProject || isCreatingEpisode}
-                className="h-9 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black tracking-widest disabled:opacity-40 flex items-center gap-2"
+                className="od-btn-primary h-9 px-4 rounded-lg text-[10px] font-black tracking-widest flex items-center gap-2"
               >
                 {isCreatingEpisode ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
                 新建单集
@@ -178,7 +178,7 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center justify-center px-2 py-0.5 rounded bg-indigo-500/20 border border-indigo-400/30 text-indigo-200 text-[10px] font-black">
+                          <span className="od-chip-primary inline-flex items-center justify-center px-2 py-0.5 rounded text-[10px] font-black">
                             第 {episode.episodeNo} 集
                           </span>
                           <span className="text-[12px] font-bold text-white truncate">{episode.title}</span>
@@ -199,7 +199,7 @@ const ProjectManager: React.FC<ProjectManagerProps> = ({
                             setOpeningEpisodeId(null);
                           }
                         }}
-                        className="h-8 px-3 rounded-lg bg-white/5 border border-white/10 text-slate-200 hover:text-white hover:bg-white/10 text-[10px] font-black tracking-widest disabled:opacity-40"
+                        className="od-btn-ghost h-8 px-3 rounded-lg text-[10px] font-black tracking-widest"
                         disabled={!isElectronRuntime || openingEpisodeId === episode.episodeId}
                       >
                         {openingEpisodeId === episode.episodeId ? '进入中...' : '进入创作'}

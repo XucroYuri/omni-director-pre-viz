@@ -24,11 +24,11 @@ const PromptOptimizer: React.FC<PromptOptimizerProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[150] flex items-center justify-center p-6 animate-in fade-in">
-      <div className="bg-[#16191f] border border-white/10 rounded-xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+      <div className="od-modal-surface bg-[#16191f] border border-white/10 rounded-xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
         {/* 标题栏 */}
         <div className="p-6 border-b border-white/5 flex justify-between items-center bg-[#0f1115]">
           <div className="flex items-center gap-4">
-            <div className="w-10 h-10 bg-indigo-500/10 rounded flex items-center justify-center text-indigo-400">
+            <div className="od-chip-primary w-10 h-10 rounded flex items-center justify-center">
               <Wand2 size={20} />
             </div>
             <div>
@@ -40,16 +40,16 @@ const PromptOptimizer: React.FC<PromptOptimizerProps> = ({
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="text-slate-600 hover:text-white transition-all"><X size={24} /></button>
+          <button onClick={onClose} className="od-btn-ghost text-slate-600 hover:text-white transition-all rounded-lg p-1.5"><X size={24} /></button>
         </div>
 
         {/* 内容区域 */}
         <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
           {isOptimizing ? (
             <div className="py-20 flex flex-col items-center justify-center space-y-4">
-              <Loader2 size={32} className="text-indigo-400 animate-spin" />
+              <Loader2 size={32} className="od-tone-primary animate-spin" />
               <div className="text-center">
-                <p className="text-indigo-400 text-[10px] font-bold uppercase tracking-widest">正在扫描电影元数据...</p>
+                <p className="od-tone-primary text-[10px] font-bold uppercase tracking-widest">正在扫描电影元数据...</p>
                 <p className="text-slate-600 text-[9px] font-bold uppercase tracking-widest">
                   正在评估 {gridLayout.rows}x{gridLayout.cols} 网格一致性...
                 </p>
@@ -58,21 +58,21 @@ const PromptOptimizer: React.FC<PromptOptimizerProps> = ({
           ) : optimization ? (
             <div className="space-y-8 animate-in slide-in-from-bottom-2">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <section className="bg-[#0f1115] p-5 rounded border border-white/5">
-                  <h4 className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                <section className="od-panel-soft p-5 rounded">
+                  <h4 className="text-[9px] font-bold od-tone-primary uppercase tracking-widest mb-3 flex items-center gap-2">
                     <MessageSquare size={12} /> AI 导演点评
                   </h4>
                   <p className="text-slate-300 text-[11px] leading-relaxed italic">"{optimization.critique}"</p>
                 </section>
 
-                <section className="bg-[#0f1115] p-5 rounded border border-white/5">
-                  <h4 className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                <section className="od-panel-soft p-5 rounded">
+                  <h4 className="text-[9px] font-bold od-tone-success uppercase tracking-widest mb-3 flex items-center gap-2">
                     <Sparkles size={12} /> 改进建议
                   </h4>
                   <ul className="space-y-2">
                     {optimization.suggestions.map((s, idx) => (
                       <li key={idx} className="flex gap-2 items-start text-[11px] text-slate-400">
-                        <span className="text-emerald-500 font-bold">•</span>
+                        <span className="od-tone-success font-bold">•</span>
                         <span>{s}</span>
                       </li>
                     ))}
@@ -80,7 +80,7 @@ const PromptOptimizer: React.FC<PromptOptimizerProps> = ({
                 </section>
               </div>
 
-              <section className="bg-black/20 p-6 rounded border border-white/5">
+              <section className="od-panel-soft p-6 rounded">
                 <div className="flex items-center justify-between mb-6">
                   <h4 className="text-[9px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
                     <CheckCircle size={12} /> 优化后的提示词矩阵
@@ -88,13 +88,13 @@ const PromptOptimizer: React.FC<PromptOptimizerProps> = ({
                   <div className="flex gap-2">
                     <button 
                       onClick={onOptimize}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded text-[9px] font-bold uppercase transition-all"
+                      className="od-btn-ghost flex items-center gap-1.5 px-3 py-1.5 rounded text-[9px] font-bold uppercase transition-all"
                     >
                       <RefreshCw size={12} /> 重新审计
                     </button>
                     <button 
                       onClick={() => onApply(optimization.optimizedPrompts)}
-                      className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[9px] font-bold uppercase transition-all shadow-lg"
+                      className="od-btn-primary flex items-center gap-1.5 px-4 py-1.5 rounded text-[9px] font-bold uppercase transition-all shadow-lg"
                     >
                       <Check size={14} /> 应用优化建议
                     </button>
@@ -102,7 +102,7 @@ const PromptOptimizer: React.FC<PromptOptimizerProps> = ({
                 </div>
                 <div className="grid grid-cols-1 gap-1.5 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
                   {optimization.optimizedPrompts.map((p, i) => (
-                    <div key={i} className="flex gap-3 items-center p-2 bg-[#1c2027] rounded border border-white/5 group hover:border-indigo-500/20">
+                    <div key={i} className="od-panel-soft od-hover-primary flex gap-3 items-center p-2 rounded group">
                       <span className="text-[8px] font-mono text-slate-600 w-8 shrink-0">#{i + 1}</span>
                       <p className="text-[10px] font-mono text-slate-400 truncate flex-1">{p}</p>
                     </div>
@@ -123,7 +123,7 @@ const PromptOptimizer: React.FC<PromptOptimizerProps> = ({
               </div>
               <button 
                 onClick={onOptimize}
-                className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-bold uppercase tracking-widest transition-all shadow-xl flex items-center gap-2 mx-auto"
+                className="od-btn-primary px-8 py-3 rounded text-[10px] font-bold uppercase tracking-widest transition-all shadow-xl flex items-center gap-2 mx-auto"
               >
                 <Sparkles size={16} /> 开始深度审计
               </button>
@@ -134,7 +134,7 @@ const PromptOptimizer: React.FC<PromptOptimizerProps> = ({
         {/* 页脚 */}
         <div className="px-6 py-4 bg-[#0f1115] border-t border-white/5 flex items-center justify-between">
            <p className="text-[9px] font-bold text-slate-700 uppercase tracking-widest">Gemini 神经处理引擎 v3.0</p>
-           {optimization && <span className="text-[9px] font-bold text-emerald-500 uppercase">验证通过 - 视觉一致性增强已就绪</span>}
+           {optimization && <span className="text-[9px] font-bold od-tone-success uppercase">验证通过 - 视觉一致性增强已就绪</span>}
         </div>
       </div>
     </div>

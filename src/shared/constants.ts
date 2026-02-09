@@ -1,11 +1,98 @@
+import type { ProviderId, ProviderModelMap, RuntimeEnvConfig } from './types';
 
-export const DEFAULT_STYLE = "Cinematic 2D anime style, high-end production quality, sharp focus, vibrant lighting, expressive character designs, professional concept art";
+export const DEFAULT_STYLE =
+  'Cinematic 2D anime style, high-end production quality, sharp focus, vibrant lighting, expressive character designs, professional concept art';
 
-// Model IDs (locked by consensus)
-// TEXT: aihubmix gemini -> gemini-3-flash-preview
-// IMAGE: aihubmix gemini -> gemini-3-pro-image-preview
-export const TEXT_MODEL = 'gemini-3-flash-preview';
-export const IMAGE_MODEL = 'gemini-3-pro-image-preview';
+export const DEFAULT_PROVIDER_BASE_URLS: Record<ProviderId, { geminiBaseUrl: string; openaiBaseUrl: string }> = {
+  aihubmix: {
+    geminiBaseUrl: 'https://aihubmix.com/gemini',
+    openaiBaseUrl: 'https://aihubmix.com/v1',
+  },
+  gemini: {
+    geminiBaseUrl: 'https://generativelanguage.googleapis.com',
+    openaiBaseUrl: '',
+  },
+  volcengine: {
+    geminiBaseUrl: '',
+    openaiBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+  },
+};
+
+export const DEFAULT_PROVIDER_MODELS: Record<ProviderId, ProviderModelMap> = {
+  aihubmix: {
+    llm: ['gemini-3-flash-preview', 'gemini-3-pro-preview'],
+    image: ['gemini-3-pro-image-preview'],
+    video: ['sora-2', 'sora-2-pro', 'jimeng-3.0-pro'],
+    tts: [],
+    music: [],
+    sfx: [],
+  },
+  gemini: {
+    llm: ['gemini-3-flash-preview', 'gemini-3-pro-preview'],
+    image: ['gemini-3-pro-image-preview'],
+    video: ['veo-3.1-fast-generate-preview', 'veo-3.1-generate-preview'],
+    tts: [],
+    music: [],
+    sfx: [],
+  },
+  volcengine: {
+    llm: ['doubao-seed-1-8'],
+    image: ['doubao-seedream-4-5'],
+    video: ['doubao-seedance-1-5-pro'],
+    tts: [],
+    music: [],
+    sfx: [],
+  },
+};
+
+function cloneModelMap(source: ProviderModelMap): ProviderModelMap {
+  return {
+    llm: [...source.llm],
+    image: [...source.image],
+    video: [...source.video],
+    tts: [...source.tts],
+    music: [...source.music],
+    sfx: [...source.sfx],
+  };
+}
+
+export function createDefaultRuntimeEnvConfig(): RuntimeEnvConfig {
+  return {
+    apiProvider: 'auto',
+    providers: {
+      aihubmix: {
+        enabled: true,
+        priority: 1,
+        apiKeys: [],
+        geminiBaseUrl: DEFAULT_PROVIDER_BASE_URLS.aihubmix.geminiBaseUrl,
+        openaiBaseUrl: DEFAULT_PROVIDER_BASE_URLS.aihubmix.openaiBaseUrl,
+        models: cloneModelMap(DEFAULT_PROVIDER_MODELS.aihubmix),
+      },
+      gemini: {
+        enabled: true,
+        priority: 2,
+        apiKeys: [],
+        geminiBaseUrl: DEFAULT_PROVIDER_BASE_URLS.gemini.geminiBaseUrl,
+        openaiBaseUrl: DEFAULT_PROVIDER_BASE_URLS.gemini.openaiBaseUrl,
+        models: cloneModelMap(DEFAULT_PROVIDER_MODELS.gemini),
+      },
+      volcengine: {
+        enabled: false,
+        priority: 3,
+        apiKeys: [],
+        geminiBaseUrl: DEFAULT_PROVIDER_BASE_URLS.volcengine.geminiBaseUrl,
+        openaiBaseUrl: DEFAULT_PROVIDER_BASE_URLS.volcengine.openaiBaseUrl,
+        models: cloneModelMap(DEFAULT_PROVIDER_MODELS.volcengine),
+      },
+    },
+  };
+}
+
+export const DEFAULT_RUNTIME_ENV_CONFIG = createDefaultRuntimeEnvConfig();
+
+// Backward-compatible aliases for existing generation code.
+export const TEXT_MODEL = DEFAULT_PROVIDER_MODELS.aihubmix.llm[0];
+export const IMAGE_MODEL = DEFAULT_PROVIDER_MODELS.aihubmix.image[0];
 
 export const SYSTEM_INSTRUCTION_BREAKDOWN = `
 你是一个专业的影视剧本拆解专家。

@@ -38,15 +38,20 @@ interface SidebarProps {
   episodeId: string;
   isElectronRuntime: boolean;
   notify?: (tone: NoticeTone, message: string) => void;
+  onUpdateSelectedShotGridLayout?: (layout: { rows: number; cols: number }) => void;
 }
 
 type SortOption = 'name' | 'newest';
+const GRID_VALUES = [1, 2, 3, 4, 5] as const;
 
 const Sidebar: React.FC<SidebarProps> = ({ 
   config, setConfig, shots, selectedShotId, setSelectedShotId, 
   isLoading, script, setScript, handleBreakdown, scriptOverview, sceneTable, beatTable, episodeId, isElectronRuntime, notify,
+  onUpdateSelectedShotGridLayout,
 }) => {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 1600 : false,
+  );
   const [editorTab, setEditorTab] = useState<'script' | 'timeline' | 'visuals'>('script');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -63,35 +68,44 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const themeMap = {
     indigo: {
-      text: 'text-indigo-400',
-      border: 'hover:border-indigo-400/40',
-      bg: 'bg-indigo-500',
-      shadow: 'shadow-indigo-500/20',
-      linkedCard: 'border-indigo-400 ring-1 ring-indigo-400/30 shadow-[0_0_20px_rgba(var(--indigo-rgb),0.25)]',
-      badgeBg: 'bg-indigo-500',
-      linkedPill: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/10',
+      text: 'od-tone-primary',
+      linkedCard: 'od-linked-primary ring-1',
+      badgeBg: 'od-bg-primary',
+      linkedPill: 'od-pill-primary',
+      iconTone: 'od-tone-primary',
+      focusWithin: 'od-focus-primary',
     },
     amber: {
-      text: 'text-amber-400',
-      border: 'hover:border-amber-400/40',
-      bg: 'bg-amber-500',
-      shadow: 'shadow-amber-500/20',
-      linkedCard: 'border-amber-400 ring-1 ring-amber-400/30 shadow-[0_0_20px_rgba(var(--amber-rgb),0.25)]',
-      badgeBg: 'bg-amber-500',
-      linkedPill: 'bg-amber-500/20 text-amber-300 border-amber-500/10',
+      text: 'od-tone-warning',
+      linkedCard: 'od-linked-warning ring-1',
+      badgeBg: 'od-bg-warning',
+      linkedPill: 'od-pill-warning',
+      iconTone: 'od-tone-warning',
+      focusWithin: 'od-focus-warning',
     },
     emerald: {
-      text: 'text-emerald-400',
-      border: 'hover:border-emerald-400/40',
-      bg: 'bg-emerald-500',
-      shadow: 'shadow-emerald-500/20',
-      linkedCard: 'border-emerald-400 ring-1 ring-emerald-400/30 shadow-[0_0_20px_rgba(var(--emerald-rgb),0.25)]',
-      badgeBg: 'bg-emerald-500',
-      linkedPill: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/10',
+      text: 'od-tone-success',
+      linkedCard: 'od-linked-success ring-1',
+      badgeBg: 'od-bg-success',
+      linkedPill: 'od-pill-success',
+      iconTone: 'od-tone-success',
+      focusWithin: 'od-focus-success',
     },
   } as const;
 
   const selectedShot = useMemo(() => shots.find(s => s.id === selectedShotId), [shots, selectedShotId]);
+  const selectedShotGridLayout = useMemo(
+    () => (selectedShot ? normalizeGridLayout(selectedShot.gridLayout) : null),
+    [selectedShot],
+  );
+  const selectedShotCellCount = selectedShotGridLayout ? getGridCellCount(selectedShotGridLayout) : 0;
+
+  const handleGridLayoutChange = (field: 'rows' | 'cols', value: number) => {
+    if (!selectedShotGridLayout || !onUpdateSelectedShotGridLayout) return;
+    const nextLayout = normalizeGridLayout({ ...selectedShotGridLayout, [field]: value }, selectedShotGridLayout);
+    onUpdateSelectedShotGridLayout(nextLayout);
+  };
+
   const pushNotice = (tone: NoticeTone, message: string) => {
     if (notify) {
       notify(tone, message);
@@ -318,10 +332,10 @@ const Sidebar: React.FC<SidebarProps> = ({
           {/* 图片上传/预览/AI生成区 */}
           <div className="w-14 h-14 bg-black rounded-lg overflow-hidden border border-white/10 relative shrink-0 shadow-inner flex items-center justify-center group/img">
             {isGenerating ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-indigo-950/40">
-                 <Loader2 size={16} className="text-indigo-400 animate-spin" />
-                 <div className="absolute inset-x-0 h-[2px] bg-indigo-400/70 shadow-[0_0_10px_indigo] animate-[scanner_2s_infinite_ease-in-out]" />
-                 <span className="text-[7px] text-indigo-400 font-black mt-1 tracking-tighter">处理中</span>
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60">
+                 <Loader2 size={16} className="od-tone-primary animate-spin" />
+                 <div className="absolute inset-x-0 h-[2px] od-fill-primary shadow-[0_0_10px_rgba(var(--primary-rgb),0.9)] animate-[scanner_2s_infinite_ease-in-out]" />
+                 <span className="text-[7px] od-tone-primary font-black mt-1 tracking-tighter">处理中</span>
               </div>
             ) : item.refImage ? (
               <>
@@ -343,7 +357,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="flex gap-1">
                    <button 
                      onClick={() => handleGenerateAssetRef(type, item.id)}
-                     className="p-1 text-indigo-400 hover:text-white hover:bg-indigo-500/30 rounded-md transition-all"
+                     className="p-1 od-tone-primary hover:text-white od-hover-primary rounded-md transition-all"
                      title="AI 生成参考图"
                    >
                      <Wand2 size={14} className="animate-pulse" />
@@ -371,7 +385,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             />
             <div className="flex items-center gap-2">
                <span className={`text-[8px] font-black uppercase tracking-wider ${theme.text}`}>{label}</span>
-               {item.tags?.includes('Auto-Scan') && <span className="text-[7px] px-1 bg-indigo-500/20 text-indigo-300 rounded-sm font-bold border border-indigo-500/10">已同步</span>}
+               {item.tags?.includes('Auto-Scan') && <span className="text-[7px] px-1 od-chip-primary rounded-sm font-bold border">已同步</span>}
                {isLinkedToShot && <span className={`text-[7px] px-1 rounded-sm font-bold border ${theme.linkedPill}`}>已绑定</span>}
             </div>
           </div>
@@ -379,7 +393,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-all">
             <button 
               onClick={() => handleEnhanceDescription(type, item.id)} 
-              className="p-1.5 text-indigo-300 hover:bg-indigo-500/20 rounded-md transition-colors"
+              className="p-1.5 od-tone-primary od-hover-primary rounded-md transition-colors"
               title="AI 增强描述"
             >
               {isEnhancingId === item.id ? <Loader2 size={12} className="animate-spin"/> : <Sparkles size={12}/>}
@@ -401,7 +415,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               <button onClick={() => removeTag(type, item.id, t)} className="hover:text-red-400"><X size={6}/></button>
             </span>
           ))}
-          <div className="flex items-center gap-1 bg-black/30 px-1.5 py-0.5 rounded border border-dashed border-white/10 focus-within:border-indigo-500/50 transition-colors">
+          <div className={`flex items-center gap-1 bg-black/30 px-1.5 py-0.5 rounded border border-dashed border-white/10 transition-colors ${theme.focusWithin}`}>
             <Plus size={8} className="text-slate-600" />
             <input 
               type="text" 
@@ -422,7 +436,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         {/* 描述编辑 */}
         <div className="relative group/desc">
           <textarea
-            className="w-full bg-black/40 border border-white/5 rounded-md p-2 text-[10px] leading-snug h-16 outline-none text-slate-300 focus:text-slate-100 focus:border-indigo-500/40 focus:bg-white/5 transition-all resize-none scrollbar-none placeholder:text-slate-700"
+            className="od-input w-full rounded-md p-2 text-[10px] leading-snug h-16 outline-none focus:text-slate-100 transition-all resize-none scrollbar-none placeholder:text-slate-700"
             value={item.description}
             onChange={(e) => updateItem(type, item.id, { description: e.target.value })}
             placeholder="填写资产外观、材质、动作特征..."
@@ -461,22 +475,78 @@ const Sidebar: React.FC<SidebarProps> = ({
       ? '请先输入剧本内容。'
       : '';
 
+  const openDrawerTab = (tab: 'script' | 'timeline' | 'visuals') => {
+    setEditorTab(tab);
+    setCollapsed(false);
+  };
+
   return (
-    <div className={`h-full shrink-0 bg-[#16191f] border-r border-white/10 flex flex-col transition-all duration-300 shadow-2xl ${collapsed ? 'w-16' : 'w-80'}`}>
-      <div className={`h-14 flex items-center border-b border-white/10 ${collapsed ? 'justify-center' : 'justify-between px-4'}`}>
+    <div className={`od-drawer h-full shrink-0 bg-[#16191f] border-r border-white/10 flex flex-col transition-all duration-300 shadow-2xl ${collapsed ? 'w-16' : 'w-80'}`}>
+      <div className={`h-12 flex items-center border-b border-white/10 ${collapsed ? 'justify-center' : 'justify-between px-2.5'}`}>
         {!collapsed && (
           <div className="flex items-center gap-3">
-            <div className="w-6 h-6 bg-indigo-500/20 rounded flex items-center justify-center border border-indigo-500/30"><Database size={12} className="text-indigo-400" /></div>
+            <div className="w-6 h-6 od-bg-primary-soft rounded flex items-center justify-center border border-white/15"><Database size={12} className="od-tone-primary" /></div>
             <span className="text-[11px] font-black text-slate-100 tracking-[0.12em]">控制中心</span>
           </div>
         )}
-        <button onClick={() => setCollapsed(!collapsed)} className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors">
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className="h-8 w-8 text-slate-400 hover:text-white rounded-lg transition-colors flex items-center justify-center"
+          title={collapsed ? '展开左侧栏' : '折叠左侧栏'}
+          aria-label={collapsed ? '展开左侧栏' : '折叠左侧栏'}
+        >
           {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
         </button>
       </div>
 
       <div className="flex-1 flex flex-col min-h-0">
-        {!collapsed && (
+        {collapsed ? (
+          <div className="flex-1 flex flex-col items-center justify-between py-3">
+            <div className="flex flex-col items-center gap-2">
+              {[
+                { tab: 'script' as const, label: '剧本', title: '展开剧本抽屉', Icon: FileText },
+                { tab: 'timeline' as const, label: '分镜', title: '展开分镜抽屉', Icon: ScrollText },
+                { tab: 'visuals' as const, label: '美术', title: '展开美术抽屉', Icon: LayoutGrid },
+              ].map(({ tab, label, title, Icon }) => {
+                const active = editorTab === tab;
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => openDrawerTab(tab)}
+                    title={title}
+                    aria-label={title}
+                    className={`w-11 h-11 rounded-xl border flex flex-col items-center justify-center gap-0.5 transition-all ${
+                      active
+                        ? 'od-chip-primary'
+                        : 'od-btn-ghost'
+                    }`}
+                  >
+                    <Icon size={15} />
+                    <span className="text-[8px] font-black tracking-wide">{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => {
+                setEditorTab('script');
+                setShowGlobalWorkbench(true);
+                setCollapsed(false);
+              }}
+              title="展开全局工作台抽屉"
+              aria-label="展开全局工作台抽屉"
+              className={`w-11 h-11 rounded-xl border flex flex-col items-center justify-center gap-0.5 transition-all ${
+                showGlobalWorkbench
+                  ? 'od-chip-primary'
+                  : 'od-btn-ghost'
+              }`}
+            >
+              <SlidersHorizontal size={15} />
+              <span className="text-[8px] font-black tracking-wide">全局</span>
+            </button>
+          </div>
+        ) : (
           <>
             <div className="flex-1 flex flex-col min-h-0 border-b border-white/10 bg-[#16191f]/40">
               <div className="p-2 border-b border-white/10 bg-black/30 grid grid-cols-3 gap-2">
@@ -484,8 +554,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                   onClick={() => setEditorTab('script')}
                   className={`h-9 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-1.5 ${
                     editorTab === 'script'
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-white/5 text-slate-300 hover:text-white'
+                      ? 'od-btn-primary'
+                      : 'od-btn-ghost'
                   }`}
                 >
                   <FileText size={13} />
@@ -495,8 +565,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                   onClick={() => setEditorTab('timeline')}
                   className={`h-9 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-1.5 ${
                     editorTab === 'timeline'
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-white/5 text-slate-300 hover:text-white'
+                      ? 'od-btn-primary'
+                      : 'od-btn-ghost'
                   }`}
                 >
                   <ScrollText size={13} />
@@ -506,8 +576,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                   onClick={() => setEditorTab('visuals')}
                   className={`h-9 rounded-lg text-[10px] font-black tracking-widest transition-all flex items-center justify-center gap-1.5 ${
                     editorTab === 'visuals'
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-white/5 text-slate-300 hover:text-white'
+                      ? 'od-btn-primary'
+                      : 'od-btn-ghost'
                   }`}
                 >
                   <LayoutGrid size={13} />
@@ -535,7 +605,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                   </div>
                   {!isElectronRuntime ? (
-                    <p className="mt-2 text-[10px] text-amber-300">
+                    <p className="mt-2 text-[10px] od-tone-warning">
                       当前为浏览器预览模式，剧本解析仅在 Electron 桌面端可用。
                     </p>
                   ) : null}
@@ -562,26 +632,26 @@ const Sidebar: React.FC<SidebarProps> = ({
                           onClick={() => setSelectedShotId(shot.id)}
                           className={`group px-2.5 py-2 rounded-md cursor-pointer transition-all border ${
                             isSelected
-                              ? 'bg-indigo-500/15 border-indigo-400/50 shadow-inner'
+                              ? 'od-selected-primary shadow-inner'
                               : 'bg-transparent border-transparent hover:bg-white/5 hover:border-white/10'
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
                               <div className="flex items-center gap-1.5">
-                                <span className={`text-[9px] font-mono font-bold ${isSelected ? 'text-indigo-300' : 'text-slate-500'}`}>SH_{shot.id.substring(0, 4)}</span>
-                                <span className={`text-[7px] font-black px-1 rounded ${isSelected ? 'bg-indigo-500 text-white' : 'bg-white/5 text-slate-600'}`}>{shot.contextTag}</span>
+                                <span className={`text-[9px] font-mono font-bold ${isSelected ? 'od-tone-primary' : 'text-slate-500'}`}>SH_{shot.id.substring(0, 4)}</span>
+                                <span className={`text-[7px] font-black px-1 rounded ${isSelected ? 'od-bg-primary text-white' : 'bg-white/5 text-slate-600'}`}>{shot.contextTag}</span>
                               </div>
                               <p className={`mt-0.5 text-[10px] leading-snug line-clamp-1 font-medium ${isSelected ? 'text-slate-100' : 'text-slate-400'}`}>{shot.visualTranslation}</p>
                             </div>
                             <div className="flex items-center gap-1 shrink-0 pt-0.5">
                               {shot.status === 'failed' && <AlertCircle size={9} className="text-red-500" />}
-                              {isRendered && <CheckCircle2 size={9} className="text-emerald-400" />}
+                              {isRendered && <CheckCircle2 size={9} className="od-tone-success" />}
                             </div>
                           </div>
                           <div className="mt-1 flex items-center gap-1">
-                            <span className={`inline-flex items-center justify-center min-w-4 h-4 rounded text-[7px] font-black ${hasAssets ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-white/5 text-slate-600 border border-white/5'}`}>资</span>
-                            <span className={`inline-flex items-center justify-center min-w-4 h-4 rounded text-[7px] font-black ${hasPrompts ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' : 'bg-white/5 text-slate-600 border border-white/5'}`}>词</span>
+                            <span className={`inline-flex items-center justify-center min-w-4 h-4 rounded text-[7px] font-black ${hasAssets ? 'od-pill-success' : 'bg-white/5 text-slate-600 border border-white/5'}`}>资</span>
+                            <span className={`inline-flex items-center justify-center min-w-4 h-4 rounded text-[7px] font-black ${hasPrompts ? 'od-pill-primary' : 'bg-white/5 text-slate-600 border border-white/5'}`}>词</span>
                             <span className={`inline-flex items-center justify-center min-w-4 h-4 rounded text-[7px] font-black ${isRendered ? 'bg-slate-200/30 text-slate-100 border border-slate-300/40' : 'bg-white/5 text-slate-600 border border-white/5'}`}>图</span>
                           </div>
                         </div>
@@ -605,31 +675,31 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                   <div className="flex items-center gap-2">
                     <div className="relative group flex-1">
-                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-indigo-400" />
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 od-group-focus-primary" />
                       <input
                         type="text"
                         placeholder="搜索美术参考..."
-                        className="w-full bg-black/40 border border-white/10 rounded-lg py-2 pl-9 pr-3 text-[11px] outline-none text-slate-200 focus:border-indigo-500/50 focus:bg-white/5"
+                        className="od-input w-full rounded-lg py-2 pl-9 pr-3 text-[11px] outline-none"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                       />
                     </div>
                     <div className="flex gap-1">
-                      <button onClick={handleExport} className="p-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-indigo-400 rounded-lg transition-all border border-white/5" title="导出美术参考库"><Download size={14} /></button>
-                      <button onClick={() => fileInputRef.current?.click()} className="p-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-amber-400 rounded-lg transition-all border border-white/5" title="导入美术参考库"><Upload size={14} /></button>
+                      <button onClick={handleExport} className="od-btn-ghost od-hover-tone-primary p-2 rounded-lg text-slate-400 transition-all" title="导出美术参考库"><Download size={14} /></button>
+                      <button onClick={() => fileInputRef.current?.click()} className="od-btn-ghost od-hover-tone-warning p-2 rounded-lg text-slate-400 transition-all" title="导入美术参考库"><Upload size={14} /></button>
                       <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleImport} />
                     </div>
                   </div>
 
                   <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-3 pr-1">
                     {pendingDelete && (
-                      <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 flex items-center justify-between gap-3">
-                        <div className="text-[10px] text-amber-200 truncate">
+                      <div className="rounded-lg od-alert-warning px-3 py-2 flex items-center justify-between gap-3">
+                        <div className="text-[10px] truncate">
                           已删除 <span className="font-bold">{pendingDelete.item.name}</span>，可撤销。
                         </div>
                         <button
                           onClick={handleUndoDelete}
-                          className="h-7 px-2 rounded-md bg-amber-400/20 border border-amber-300/40 text-amber-100 hover:bg-amber-300/30 text-[9px] font-black uppercase tracking-widest shrink-0"
+                          className="h-7 px-2 rounded-md od-tile-warning text-[9px] font-black uppercase tracking-widest shrink-0"
                         >
                           撤销
                         </button>
@@ -640,11 +710,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                       <section key={cat.key} className="rounded-lg border border-white/10 bg-white/[0.02] px-2 py-2">
                         <div className="flex items-center justify-between mb-2 px-1">
                           <div className="flex items-center gap-2 cursor-pointer group" onClick={() => toggle(cat.key as keyof typeof expanded)}>
-                            <cat.Icon size={12} className={cat.color === 'indigo' ? 'text-indigo-400' : cat.color === 'amber' ? 'text-amber-400' : 'text-emerald-400'} />
+                            <cat.Icon size={12} className={themeMap[cat.color].iconTone} />
                             <span className="text-[10px] font-black text-slate-300 tracking-widest">{cat.label}</span>
                             <span className="text-[9px] text-slate-500">({cat.items.length})</span>
                           </div>
-                          <button onClick={() => addItem(cat.key as any, cat.prefix)} className="p-1.5 bg-white/5 hover:bg-white/15 rounded-md border border-white/5 text-slate-400 hover:text-white transition-all" title={`新增${cat.prefix}`}><Plus size={14} /></button>
+                          <button onClick={() => addItem(cat.key as any, cat.prefix)} className="od-btn-ghost p-1.5 rounded-md text-slate-400 hover:text-white transition-all" title={`新增${cat.prefix}`}><Plus size={14} /></button>
                         </div>
                         {expanded[cat.key as keyof typeof expanded] && (
                           <div className="space-y-3 px-1">
@@ -693,7 +763,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                           onClick={() => setConfig((prev) => ({ ...prev, aspectRatio: ratio }))}
                           className={`h-8 rounded-lg border text-[10px] font-black transition-all ${
                             active
-                              ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
+                              ? 'od-pill-primary'
                               : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/30'
                           }`}
                         >
@@ -715,7 +785,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                           onClick={() => setConfig((prev) => ({ ...prev, resolution }))}
                           className={`h-8 rounded-lg border text-[10px] font-black transition-all ${
                             active
-                              ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
+                              ? 'od-pill-primary'
                               : 'border-white/10 bg-black/30 text-slate-300 hover:border-white/30'
                           }`}
                         >
@@ -726,13 +796,65 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 </div>
 
+                <div>
+                  <div className="mb-1 text-[9px] font-black tracking-widest text-slate-500">网格布局（当前镜头）</div>
+                  {!selectedShot || !selectedShotGridLayout ? (
+                    <div className="rounded-lg border border-dashed border-white/10 bg-black/20 px-2.5 py-2 text-[10px] text-slate-500">
+                      请选择镜头后再设置网格布局。
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-white/10 bg-black/25 px-2.5 py-2 space-y-2">
+                      <div className="flex items-center justify-between text-[9px]">
+                        <span className="font-mono font-black od-tone-primary">SH_{selectedShot.id.substring(0, 4)}</span>
+                        <span className="text-slate-500">
+                          {selectedShotGridLayout.rows}x{selectedShotGridLayout.cols} / {selectedShotCellCount} 格
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-[minmax(0,1fr)_18px_minmax(0,1fr)] items-end gap-1.5">
+                        <label className="block">
+                          <span className="mb-1 block text-[9px] text-slate-500">行</span>
+                          <select
+                            value={selectedShotGridLayout.rows}
+                            onChange={(event) => handleGridLayoutChange('rows', Number(event.target.value))}
+                            className="od-input h-8 w-full rounded-lg px-2 text-[10px] font-black outline-none"
+                          >
+                            {GRID_VALUES.map((value) => (
+                              <option key={`wb-row-${value}`} value={value}>
+                                {value}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <span className="text-center text-[10px] font-black text-slate-500">x</span>
+                        <label className="block">
+                          <span className="mb-1 block text-[9px] text-slate-500">列</span>
+                          <select
+                            value={selectedShotGridLayout.cols}
+                            onChange={(event) => handleGridLayoutChange('cols', Number(event.target.value))}
+                            className="od-input h-8 w-full rounded-lg px-2 text-[10px] font-black outline-none"
+                          >
+                            {GRID_VALUES.map((value) => (
+                              <option key={`wb-col-${value}`} value={value}>
+                                {value}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      <div className="text-[9px] leading-relaxed text-slate-500">
+                        修改网格会重置当前镜头母图、切片与视频状态，以保证流程闭环一致。
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <label className="block">
                   <div className="mb-1 text-[9px] font-black tracking-widest text-slate-500">美术风格（全局）</div>
                   <textarea
                     rows={3}
                     value={config.artStyle}
                     onChange={(event) => setConfig((prev) => ({ ...prev, artStyle: event.target.value }))}
-                    className="w-full resize-none rounded-lg border border-white/10 bg-black/30 px-2 py-2 text-[10px] text-slate-200 outline-none focus:border-indigo-500/40"
+                    className="od-input w-full resize-none rounded-lg px-2 py-2 text-[10px] outline-none"
                   />
                 </label>
               </div>
@@ -744,7 +866,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               onClick={handleBreakdown}
               disabled={!canRunBreakdown}
               title={breakdownDisabledReason}
-              className="flex-1 h-11 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black tracking-widest transition-all disabled:opacity-40 disabled:hover:bg-indigo-600"
+              className="od-btn-primary flex-1 h-11 rounded-xl text-[11px] font-black tracking-widest transition-all"
             >
               {isLoading ? '剧本解析中...' : '开始解析剧本'}
             </button>
@@ -753,8 +875,8 @@ const Sidebar: React.FC<SidebarProps> = ({
               onClick={() => setShowGlobalWorkbench((prev) => !prev)}
               className={`h-11 w-11 rounded-xl border transition-all flex items-center justify-center ${
                 showGlobalWorkbench
-                  ? 'border-indigo-400/40 bg-indigo-500/20 text-indigo-200'
-                  : 'border-white/10 bg-white/5 text-slate-300 hover:text-white hover:bg-white/10'
+                  ? 'od-chip-primary'
+                  : 'od-btn-ghost'
               }`}
               title={showGlobalWorkbench ? '收起全局工作台' : '展开全局工作台'}
               aria-label={showGlobalWorkbench ? '收起全局工作台' : '展开全局工作台'}

@@ -34,3 +34,8 @@ dist-app
 *.njsproj
 *.sln
 *.sw?
+
+# Playwright
+.playwright-cli/
+test-results/
+playwright-report/

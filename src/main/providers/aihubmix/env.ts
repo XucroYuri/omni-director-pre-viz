@@ -1,5 +1,6 @@
-import * as path from 'node:path';
-import { app } from 'electron';
+import { getRuntimeEnvConfig } from '../../services/runtimeEnvService';
+import { MissingApiCredentialError, isMissingApiCredentialError as isMissingGenericApiCredentialError } from '../router';
+import { getProviderOutputDir } from '../router';
 
 export type AihubmixEnv = {
   apiKey: string;
@@ -8,11 +9,10 @@ export type AihubmixEnv = {
   outputDir: string;
 };
 
-const MISSING_API_KEY_MESSAGE = 'Missing AIHUBMIX_API_KEY. For dev, set it in your environment (see `.env.example`).';
+const MISSING_API_KEY_MESSAGE =
+  'Missing AIHUBMIX_API_KEY. Please configure API keys in 设置 > API 与环境变量。';
 
-export class MissingAihubmixApiKeyError extends Error {
-  readonly code = 'AIHUBMIX_API_KEY_MISSING';
-
+export class MissingAihubmixApiKeyError extends MissingApiCredentialError {
   constructor(message = MISSING_API_KEY_MESSAGE) {
     super(message);
     this.name = 'MissingAihubmixApiKeyError';
@@ -21,20 +21,23 @@ export class MissingAihubmixApiKeyError extends Error {
 
 export function isMissingAihubmixApiKeyError(error: unknown): boolean {
   if (error instanceof MissingAihubmixApiKeyError) return true;
+  if (isMissingGenericApiCredentialError(error)) return true;
   if (!(error instanceof Error)) return false;
-  return error.message.includes('Missing AIHUBMIX_API_KEY');
+  return /Missing\s+AIHUBMIX_API_KEY/i.test(error.message);
 }
 
 export function getAihubmixEnv(): AihubmixEnv {
-  const apiKey = process.env.AIHUBMIX_API_KEY?.trim();
+  const runtime = getRuntimeEnvConfig();
+  const provider = runtime.providers.aihubmix;
+  const apiKey = provider.apiKeys[0]?.trim() || '';
   if (!apiKey) {
     throw new MissingAihubmixApiKeyError();
   }
 
-  const geminiBaseUrl = (process.env.AIHUBMIX_GEMINI_BASE_URL || 'https://aihubmix.com/gemini').trim();
-  const openaiBaseUrl = (process.env.AIHUBMIX_OPENAI_BASE_URL || 'https://aihubmix.com/v1').trim();
-
-  const outputDir = process.env.OMNI_OUTPUT_DIR?.trim() || path.join(app.getPath('userData'), 'output');
-
-  return { apiKey, geminiBaseUrl, openaiBaseUrl, outputDir };
+  return {
+    apiKey,
+    geminiBaseUrl: provider.geminiBaseUrl || '',
+    openaiBaseUrl: provider.openaiBaseUrl || '',
+    outputDir: getProviderOutputDir(),
+  };
 }

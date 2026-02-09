@@ -22,8 +22,13 @@
     "dev": "concurrently \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite",
     "dev:electron": "concurrently \"tsc -p tsconfig.electron.json -w\" \"wait-on tcp:3000 dist/main/main.js dist/preload/preload.js && cross-env NODE_ENV=development node scripts/run-electron-dev.cjs\"",
+    "theme:visual:capture": "electron scripts/theme-visual-regression.cjs",
+    "theme:visual:baseline": "electron scripts/theme-visual-regression.cjs --out temp_verification_out/theme-baseline",
+    "theme:visual:check": "electron scripts/theme-visual-regression.cjs --baseline temp_verification_out/theme-baseline --threshold 0.01",
+    "theme:visual:check:baseline": "electron scripts/theme-visual-regression.cjs --baseline docs/visual-baseline/theme --threshold 0.01 --out temp_verification_out/theme-check",
+    "assets:icon": "node scripts/generate-app-icon.cjs",
     "build:electron": "tsc -p tsconfig.electron.json",
-    "build": "npm run build:electron && vite build && cross-env PYTHON_PATH=python3 electron-builder --publish never",
+    "build": "npm run assets:icon && npm run build:electron && vite build && cross-env PYTHON_PATH=python3 electron-builder --publish never",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:electron": "tsc -p tsconfig.electron.json --noEmit",
@@ -60,9 +65,13 @@
   },
   "build": {
     "appId": "com.xucroyuri.omni-director-pre-viz",
-    "productName": "Omni Director Pre-viz",
+    "productName": "HC Timeline",
     "directories": {
       "output": "dist-app"
+    },
+    "icon": "build/icons/hc-timeline.png",
+    "mac": {
+      "icon": "build/icons/hc-timeline.icns"
     },
     "files": [
       "dist/**",

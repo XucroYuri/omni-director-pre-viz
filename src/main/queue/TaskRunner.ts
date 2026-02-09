@@ -12,7 +12,7 @@ import {
 } from '../../shared/utils';
 import { generateAssetImage, generateGridImage } from '../providers/aihubmix/gemini';
 import { generateShotVideo } from '../providers/aihubmix/sora2';
-import { getAihubmixEnv } from '../providers/aihubmix/env';
+import { getProviderOutputDir } from '../providers/router';
 import { assetRepo } from '../db/repos/assetRepo';
 import { shotRepo } from '../db/repos/shotRepo';
 import { dbService } from '../services/dbService';
@@ -179,7 +179,7 @@ export class TaskRunner {
     const cols = Math.max(1, gridLayout.cols);
     const cellWidth = Math.floor(width / cols);
     const cellHeight = Math.floor(height / rows);
-    const { outputDir } = getAihubmixEnv();
+    const outputDir = getProviderOutputDir();
     await fs.mkdir(path.join(outputDir, 'images'), { recursive: true });
 
     const tiles: Array<{ index: number; left: number; top: number; width: number; height: number }> = [];
