@@ -1,10 +1,49 @@
 # Omni Director Web (Phase 9.1 Bootstrap)
 
-## Local setup
+## Docker setup (recommended)
+
+This keeps `apps/web/node_modules` and npm cache in Docker volumes instead of the host workspace.
 
 1. Start local infra from repo root:
 
-`docker compose up -d`
+`npm run phase9:infra:up`
+
+2. Install web dependencies into Docker volume:
+
+`npm run phase9:web:docker:install`
+
+3. Initialize schema:
+
+`npm run phase9:web:docker:db:init`
+
+4. Start Next.js app:
+
+`npm run phase9:web:docker:dev`
+
+5. Start worker in another terminal:
+
+`npm run phase9:web:docker:worker`
+
+6. Tail logs:
+
+`npm run phase9:web:docker:logs`
+
+App runs on `http://127.0.0.1:3100`.
+Queue 运维页：`http://127.0.0.1:3100/ops/queue`
+
+Stop only app containers:
+
+`npm run phase9:web:docker:stop`
+
+Stop and remove app containers:
+
+`npm run phase9:web:docker:down`
+
+## Local setup (host Node.js)
+
+1. Start local infra from repo root:
+
+`npm run phase9:infra:up`
 
 2. Copy env (first run only):
 
@@ -22,9 +61,6 @@
 
 `npm --prefix apps/web run dev`
 
-App runs on `http://127.0.0.1:3100`.
-Queue 运维页：`http://127.0.0.1:3100/ops/queue`
-
 6. Start worker in another terminal:
 
 `npm --prefix apps/web run worker`
@@ -32,6 +68,14 @@ Queue 运维页：`http://127.0.0.1:3100/ops/queue`
 ## Cleanup
 
 `npm --prefix apps/web run clean`
+
+Repository-level cleanup (remove local caches/build outputs):
+
+`npm run clean:local`
+
+Cleanup including current project's Docker volumes:
+
+`npm run clean:local:docker`
 
 ## API smoke
 

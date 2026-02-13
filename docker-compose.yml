@@ -1,3 +1,29 @@
+x-web-common: &web-common
+  image: node:22-alpine
+  working_dir: /workspace/apps/web
+  depends_on:
+    postgres:
+      condition: service_healthy
+    minio:
+      condition: service_started
+    minio-init:
+      condition: service_completed_successfully
+  environment:
+    DATABASE_URL: postgres://omni:omni_dev_password@postgres:5432/omni_web
+    S3_ENDPOINT: http://minio:9000
+    S3_REGION: us-east-1
+    S3_BUCKET: omni-media
+    S3_ACCESS_KEY: minioadmin
+    S3_SECRET_KEY: minioadmin
+    S3_FORCE_PATH_STYLE: "true"
+    NEXT_TELEMETRY_DISABLED: "1"
+    WATCHPACK_POLLING: "true"
+    CHOKIDAR_USEPOLLING: "1"
+  volumes:
+    - ./:/workspace
+    - web_node_modules:/workspace/apps/web/node_modules
+    - web_npm_cache:/root/.npm
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -48,6 +74,22 @@ services:
       echo 'MinIO bucket ready: omni-media';
       "
 
+  web-dev:
+    <<: *web-common
+    profiles: ['web']
+    command: sh -lc "npm run dev"
+    ports:
+      - '3100:3100'
+    stdin_open: true
+    tty: true
+
+  web-worker:
+    <<: *web-common
+    profiles: ['web']
+    command: sh -lc "npm run worker"
+
 volumes:
   postgres_data:
   minio_data:
+  web_node_modules:
+  web_npm_cache:

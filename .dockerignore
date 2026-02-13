@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+apps/web/node_modules
+.npm-cache
+.next
+apps/web/.next
+dist
+dist-app
+output
+temp_verification_out
+tmp
+.tmp
+.playwright-cli

@@ -20,6 +20,19 @@
 - `vite`（Renderer dev server，`127.0.0.1:3000`）
 - `electron`（Main Process，加载 `window.api` IPC 桥接）
 
+## Phase9 Web（Docker 依赖隔离）
+推荐使用 Docker 承载 Web 依赖，避免宿主机 `node_modules/.npm-cache` 持续膨胀：
+
+1. `npm run phase9:infra:up`
+2. `npm run phase9:web:docker:install`
+3. `npm run phase9:web:docker:db:init`
+4. `npm run phase9:web:docker:dev`
+5. `npm run phase9:web:docker:worker`
+
+## 仓库清理
+- 清理本地构建产物与缓存：`npm run clean:local`
+- 清理并回收当前项目 Docker volumes：`npm run clean:local:docker`
+
 ## 开发环境变量（仅本地）
 桌面端生成能力在 Main Process 读取密钥，默认从环境变量/本地 `.env.local` 注入（`.env.example` 提供模板）：
 - `AIHUBMIX_API_KEY`
