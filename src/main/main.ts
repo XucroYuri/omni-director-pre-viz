@@ -37,7 +37,9 @@ async function createMainWindow() {
   if (isDev()) {
     await mainWindow.loadURL('http://127.0.0.1:3000');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
-    mainWindow.show();
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
   } else {
     const indexHtml = path.join(app.getAppPath(), 'dist', 'renderer', 'index.html');
     await mainWindow.loadFile(indexHtml);
