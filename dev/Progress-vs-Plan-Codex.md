@@ -1,4 +1,10 @@
+---
+status: REFERENCE
+---
+
 # 当前实现进度 vs `dev/Plan-Codex.md`（差距盘点与重构建议）
+
+> 历史文档说明：本文件为阶段性差距审计快照，当前实施入口为 `rules.md` 与 `docs/*`。
 
 **日期**：2025-12-20  
 **对象**：`/Volumes/SSD/Code/omni-director-pre-viz`（全项目代码 + dev 文档）  

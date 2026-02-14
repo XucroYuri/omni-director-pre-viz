@@ -1,4 +1,10 @@
+---
+status: REFERENCE
+---
+
 # 跨团队共识锁定协议 (Consensus Lock Protocol)
+
+> 历史文档说明：本协议记录的是 2025-12-21 的阶段性口径，当前实施与验收请以 `rules.md` 与 `docs/*` 为准。
 
 **版本**: V1.0
 **日期**: 2025-12-21
@@ -25,9 +31,9 @@
 
 ## 2. 核心共识口径 (The Locked Consensus)
 
-### 2.1 权威文档层级
-1.  **一级权威 (实施标准)**：`dev/Plan-Codex.md` + `rules.md` + `dev/Guardrails.md`
-2.  **二级权威 (共识锁定)**：`dev/Consensus-Lock.md` (本文档)
+### 2.1 文档层级（历史口径）
+1.  **一级权威 (实施标准，历史口径)**：`dev/Plan-Codex.md` + `rules.md` + `dev/Guardrails.md`
+2.  **二级权威 (共识锁定，历史口径)**：`dev/Consensus-Lock.md` (本文档)
 3.  **参考资料 (非权威)**：`dev/Plan-Electron-Standalone.md` (仅供 Electron 打包配置参考)
 
 ### 2.2 关键决策锁定 (Key Decisions)

@@ -1,3 +1,7 @@
+---
+status: REFERENCE
+---
+
 # Plan-Electron-Standalone: 跨平台本地化一键运行方案
 
 **版本**: V1.0 (Local-First Architecture)
@@ -5,7 +9,9 @@
 **状态**: Reference（非权威实施标准）
 **目标**: 实现 Mac/Windows/Linux 三端一键运行，绿色免安装，适合开源分发。
 
-> 权威实施标准与验收口径以 `dev/Plan-Codex.md` + `rules.md` + `dev/Guardrails.md` 为准；本文仅作为“Electron 桌面化/打包落地”的参考材料。
+> 历史文档说明：本文仅保留为 Electron 路线历史参考，当前实施入口为 `rules.md` 与 `docs/*`。
+
+> 当时权威实施标准与验收口径（历史口径）以 `dev/Plan-Codex.md` + `rules.md` + `dev/Guardrails.md` 为准；本文仅作为“Electron 桌面化/打包落地”的参考材料。
 
 ---
 

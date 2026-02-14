@@ -1,4 +1,10 @@
+---
+status: ARCHIVED
+---
+
 # Omni-Director Pre-viz 开发方案 (Proposal by Gemini3pro)
+
+> 历史文档说明：本文件仅用于历史方案追溯，当前实施入口为 `rules.md` 与 `docs/*`。
 
 **项目名称**: 全覆盖·智能影视预演工作站 (Omni-Director Pre-viz Workstation)  
 **版本**: V4.0 (Refined)  

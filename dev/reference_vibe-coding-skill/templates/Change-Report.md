@@ -1,3 +1,7 @@
+---
+status: REFERENCE
+---
+
 # Change Report（Agent → PM 交付报告模板）
 
 ## 1) 完成情况（对齐 DoD）
