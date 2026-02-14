@@ -51,6 +51,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Install web dependencies
+        if: ${{ hashFiles('apps/web/package.json') != '' }}
         run: npm --prefix apps/web ci
 
       - name: Docs governance audit
@@ -60,10 +61,12 @@ jobs:
         run: npm run build:electron
 
       - name: Build web app
+        if: ${{ hashFiles('apps/web/package.json') != '' }}
         run: npm run phase9:web:build
 
       - name: Electron task error E2E
         run: npm run test:e2e:task-errors
 
       - name: Web dead-letter retry E2E
+        if: ${{ hashFiles('apps/web/package.json') != '' }}
         run: npm run test:e2e:web-dead-letter-retry
